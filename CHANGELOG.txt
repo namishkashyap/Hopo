@@ -1,3 +1,12 @@
+2026-11-24 - hopo 2.6.0: fixes from the break test, and hopo for Android
+
+Windows: hopo starts even when its data files are damaged, locked or very large,
+Connect always shows the matching code when approval is on, sync skips one
+problem file instead of stopping, the phone page marks files it cannot send,
+uninstalling hopo Users or hopo Admin no longer breaks the other, and the app
+follows Windows contrast themes. Android: a first hopo app (APK) that pairs
+with PCs, sends and receives files and text, and adds Share to hopo.
+
 2026-11-04 - hopo 2.5.3: each phone browser shows once
 
 A phone or tablet that opened the page again (a new tab, another address for
