@@ -32,3 +32,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-05 | [hopo 2.5.4, fixes from the break test](2026-11-05-hopo-2.5.4-break-test-fixes.md) |
 | 2026-11-24 | [hopo 2.6 plan: smoother app, taskbar icon, right-click menu, Shift+S ring, Android](2026-11-24-hopo-2.6-plan.md) |
 | 2026-11-24 | [hopo for Android (APK), first version](2026-11-24-hopo-android-apk.md) |
+| 2026-11-24 | [hopo 2.6.0 Windows installers](2026-11-24-hopo-2.6.0-windows-installers.md) |
