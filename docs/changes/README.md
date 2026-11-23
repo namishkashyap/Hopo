@@ -34,3 +34,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-24 | [hopo for Android (APK), first version](2026-11-24-hopo-android-apk.md) |
 | 2026-11-24 | [hopo 2.6.0 Windows installers](2026-11-24-hopo-2.6.0-windows-installers.md) |
 | 2026-11-24 | [hopo Android: app closes right after opening](2026-11-24-hopo-android-startup-crash.md) |
+| 2026-11-24 | [hopo Windows: stop the lag, fix the taskbar icon](2026-11-24-hopo-smooth-ui-taskbar-icon.md) |
