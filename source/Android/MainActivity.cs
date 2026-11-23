@@ -17,7 +17,11 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnCreate(savedInstanceState);
         if (Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu && CheckSelfPermission(global::Android.Manifest.Permission.PostNotifications) != Permission.Granted)
             RequestPermissions([global::Android.Manifest.Permission.PostNotifications], 1);
-        ReceiveService.Start(this);
+        try
+        {
+            ReceiveService.Start(this);
+        }
+        catch (Exception error) { CrashReport.Save(error, "Background service"); }
         HandleShare(Intent);
     }
     protected override void OnNewIntent(Intent? intent)

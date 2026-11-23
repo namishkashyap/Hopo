@@ -14,13 +14,27 @@ public sealed class App : Avalonia.Application
     }
     public override void OnFrameworkInitializationCompleted()
     {
-        if (ApplicationLifetime is ISingleViewApplicationLifetime single)
-            single.MainView = HopoHost.Ready ? new MainView() : new TextBlock
-            {
-                Text = "hopo could not start.\n\n" + HopoHost.StartupError,
-                Margin = new(24),
-                TextWrapping = Avalonia.Media.TextWrapping.Wrap
-            };
+        // Avalonia 12 on Android asks for a new screen for each activity; other lifetimes take a single screen.
+        if (ApplicationLifetime is IActivityApplicationLifetime activity)
+            activity.MainViewFactory = CreateView;
+        else if (ApplicationLifetime is ISingleViewApplicationLifetime single)
+            single.MainView = CreateView();
+        // An error inside the screen is recorded and shown as a message instead of closing the app.
+        Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (_, e) =>
+        {
+            CrashReport.Save(e.Exception, "Screen");
+            e.Handled = true;
+            MainView.Current?.Tell("Something went wrong: " + e.Exception.Message);
+        };
         base.OnFrameworkInitializationCompleted();
     }
+    private static Control CreateView() => HopoHost.Ready ? new MainView() : new ScrollViewer
+    {
+        Content = new SelectableTextBlock
+        {
+            Text = "hopo could not start.\n\n" + HopoHost.StartupError + "\n\n" + CrashReport.Pending(),
+            Margin = new(24),
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap
+        }
+    };
 }

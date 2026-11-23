@@ -51,46 +51,71 @@ internal sealed class MainView : UserControl
         root.Children.Add(new Border { Child = toast, VerticalAlignment = VerticalAlignment.Bottom, IsHitTestVisible = false });
         root.Children.Add(overlay);
         Content = root;
-        Engine.ApprovePair = CompareAsync;
-        Engine.ApproveReceive = ReceiveAsync;
-        Engine.ApproveSync = (_, _) => { Tell("Folder sync is not available on Android yet."); return Task.FromResult(false); };
-        Engine.PeersChanged += MarkDirty;
-        Engine.Transfers.Changed += OnTransfer;
-        Engine.Browser.Notes.Changed += MarkDirty;
-        Engine.Status += message => Dispatcher.UIThread.Post(() => Tell(message));
-        Engine.Completed += OnCompleted;
-        HopoHost.Started += MarkDirty;
         // Pages are rebuilt at most a few times a second, however many progress updates arrive.
         refresh.Tick += (_, _) => { if (dirty) Refresh(); };
         toastTimer.Tick += (_, _) => { toast.IsVisible = false; toastTimer.Stop(); };
-        AttachedToVisualTree += (_, _) => { refresh.Start(); startMessage = HopoHost.StartReceiving(); Refresh(); };
-        DetachedFromVisualTree += (_, _) => refresh.Stop();
+        // Android makes a new screen after rotation or reopening; each one hooks up while shown and unhooks when closed.
+        AttachedToVisualTree += (_, _) =>
+        {
+            Current = this;
+            Engine.ApprovePair = CompareAsync;
+            Engine.ApproveReceive = ReceiveAsync;
+            Engine.ApproveSync = (_, _) => { Tell("Folder sync is not available on Android yet."); return Task.FromResult(false); };
+            Engine.PeersChanged += MarkDirty;
+            Engine.Transfers.Changed += OnTransfer;
+            Engine.Browser.Notes.Changed += MarkDirty;
+            Engine.Status += OnStatus;
+            HopoHost.Started += MarkDirty;
+            refresh.Start();
+            startMessage = HopoHost.StartReceiving();
+            Refresh();
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            refresh.Stop();
+            Engine.PeersChanged -= MarkDirty;
+            Engine.Transfers.Changed -= OnTransfer;
+            Engine.Browser.Notes.Changed -= MarkDirty;
+            Engine.Status -= OnStatus;
+            HopoHost.Started -= MarkDirty;
+            if (Current == this)
+                Current = null;
+        };
     }
     private void MarkDirty() => dirty = true;
-    private void OnTransfer(TransferRecord record)
+    private void OnTransfer(TransferRecord record) => dirty = true;
+    private void OnStatus(string message) => Dispatcher.UIThread.Post(() => Tell(message));
+    private static bool wired;
+    /// <summary>Hooked once for the app's lifetime, with or without a screen: clean up sent copies and move received files to Downloads.</summary>
+    public static void WireEngine()
     {
-        dirty = true;
-        // Copies made for sending are removed once the transfer ends, however it ends.
-        if (record.Direction == "Sent" && record.Terminal)
-            lock (outgoing)
-                if (outgoing.Remove(record.Id, out string? folder))
-                    try
-                    {
-                        Directory.Delete(folder, true);
-                    }
-                    catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-    }
-    private void OnCompleted(TransferRecord record)
-    {
-        if (record.Direction != "Received" || record.State != TransferState.Completed)
+        if (wired)
             return;
-        string folder = Path.Combine(HopoHost.Inbox, record.Id);
-        if (!Directory.Exists(folder))
-            return;
-        int saved = Platform?.SaveToDownloads(folder) ?? 0;
-        string text = saved > 0 ? $"{saved} {(saved == 1 ? "file" : "files")} from {record.PeerName} saved to Downloads/hopo." : $"Files from {record.PeerName} received.";
-        Platform?.Notify("Files received", text);
-        Dispatcher.UIThread.Post(() => Tell(text));
+        wired = true;
+        Engine.Transfers.Changed += record =>
+        {
+            // Copies made for sending are removed once the transfer ends, however it ends.
+            if (record.Direction == "Sent" && record.Terminal)
+                lock (outgoing)
+                    if (outgoing.Remove(record.Id, out string? folder))
+                        try
+                        {
+                            Directory.Delete(folder, true);
+                        }
+                        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        };
+        Engine.Completed += record =>
+        {
+            if (record.Direction != "Received" || record.State != TransferState.Completed)
+                return;
+            string folder = Path.Combine(HopoHost.Inbox, record.Id);
+            if (!Directory.Exists(folder))
+                return;
+            int saved = Platform?.SaveToDownloads(folder) ?? 0;
+            string text = saved > 0 ? $"{saved} {(saved == 1 ? "file" : "files")} from {record.PeerName} saved to Downloads/hopo." : $"Files from {record.PeerName} received.";
+            Platform?.Notify("Files received", text);
+            Dispatcher.UIThread.Post(() => Current?.Tell(text));
+        };
     }
     public void Tell(string message)
     {
@@ -106,6 +131,18 @@ internal sealed class MainView : UserControl
         content.Children.Clear();
         Peer[] peers = Engine.Peers;
         content.Children.Add(Header());
+        // A crash from the last run is shown once, so its details can be copied and sent.
+        if (CrashReport.Pending() is { } crash)
+        {
+            TextBlock details = new()
+            {
+                Text = crash.Length > 1500 ? crash[..1500] + "…" : crash,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 11,
+                FontFamily = new FontFamily("monospace")
+            };
+            content.Children.Add(Card(Title("hopo closed unexpectedly last time"), Muted("Copy these details and send them to the developer."), details, Row(Button("Copy details", () => CopyAsync(crash), true), Button("Dismiss", () => { CrashReport.Clear(); MarkDirty(); return Task.CompletedTask; }))));
+        }
         Peer[] paired = peers.Where(p => p.Paired && !p.Blocked).OrderByDescending(p => p.Online).ThenBy(p => p.Name).ToArray();
         StackPanel yours = Section("Your PCs");
         if (paired.Length == 0)

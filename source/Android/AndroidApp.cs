@@ -16,6 +16,15 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App>, IPhonePlatform
     private const string Channel = "hopo";
     private WifiManager.MulticastLock? multicast;
     public AndroidApp(IntPtr handle, JniHandleOwnership ownership) : base(handle, ownership) { }
+    public override void OnCreate()
+    {
+        // Anything that would close the app is written down first, so the next launch can show what happened.
+        CrashReport.Initialize(FilesDir!.AbsolutePath);
+        AndroidEnvironment.UnhandledExceptionRaiser += (_, e) => CrashReport.Save(e.Exception, "Android");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashReport.Save(e.ExceptionObject as Exception, "App");
+        TaskScheduler.UnobservedTaskException += (_, e) => { CrashReport.Save(e.Exception, "Background task"); e.SetObserved(); };
+        base.OnCreate();
+    }
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
         string maker = Build.Manufacturer ?? "", model = Build.Model ?? "Android phone";
@@ -23,9 +32,15 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App>, IPhonePlatform
         // A failure here is shown on screen with its reason, instead of the app closing.
         try
         {
-            HopoHost.Initialize(FilesDir!.AbsolutePath, CacheDir!.AbsolutePath, name);
+            // The real paths: /data/user/0 is a link to /data/data, and hopo refuses folders reached through links.
+            HopoHost.Initialize(new Java.IO.File(FilesDir!.AbsolutePath).CanonicalPath, new Java.IO.File(CacheDir!.AbsolutePath).CanonicalPath, name);
+            MainView.WireEngine();
         }
-        catch (Exception error) { HopoHost.StartupError = error.GetType().Name + ": " + error.Message; }
+        catch (Exception error)
+        {
+            HopoHost.StartupError = error.GetType().Name + ": " + error.Message;
+            CrashReport.Save(error, "Start");
+        }
         MainView.Platform = this;
         // Android drops multicast packets unless an app holds this lock, and PCs are found through multicast.
         if (GetSystemService(WifiService) is WifiManager wifi)
