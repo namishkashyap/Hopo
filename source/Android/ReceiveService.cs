@@ -12,11 +12,9 @@ public sealed class ReceiveService : Service
     private const string Channel = "hopo-ready", StopAction = "hopo.stop";
     public static void Start(Context context)
     {
-        Intent intent = new(context, typeof(ReceiveService));
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
-            context.StartForegroundService(intent);
-        else
-            context.StartService(intent);
+        // Started while the screen is open, so a plain start is allowed. Unlike StartForegroundService, it cannot get the app killed
+        // if Android then refuses to show the notification.
+        context.StartService(new Intent(context, typeof(ReceiveService)));
     }
     public override IBinder? OnBind(Intent? intent) => null;
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
@@ -42,10 +40,20 @@ public sealed class ReceiveService : Service
             .SetContentIntent(PendingIntent.GetActivity(this, 0, open, PendingIntentFlags.Immutable))
             .AddAction(new Notification.Action.Builder(null, "Stop", PendingIntent.GetService(this, 1, stop, PendingIntentFlags.Immutable)).Build())
             .Build()!;
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.UpsideDownCake)
-            StartForeground(1, notification, ForegroundService.TypeDataSync);
-        else
-            StartForeground(1, notification);
+        try
+        {
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.UpsideDownCake)
+                StartForeground(1, notification, ForegroundService.TypeDataSync);
+            else
+                StartForeground(1, notification);
+        }
+        catch (Exception error)
+        {
+            // Without the notification hopo still works while open; it just may stop receiving in the background.
+            CrashReport.Save(error, "Background notification");
+            StopSelf();
+            return StartCommandResult.NotSticky;
+        }
         return StartCommandResult.Sticky;
     }
     /// <summary>Android 15 limits background data sync; when the limit is reached hopo stops cleanly and starts again when opened.</summary>

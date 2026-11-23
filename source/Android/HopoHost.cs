@@ -64,8 +64,9 @@ internal static class HopoHost
             Started?.Invoke();
             return null;
         }
-        catch (Exception error) when (error is IOException or System.Net.Sockets.SocketException or InvalidOperationException)
+        catch (Exception error)
         {
+            CrashReport.Save(error, "Start receiving");
             return "hopo could not start receiving. " + TransferEngine.HumanError(error);
         }
     }
