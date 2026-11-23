@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Windows.Media.Imaging;
 
 namespace Lantoss.UI;
 
@@ -195,6 +196,32 @@ internal static class UiRegressionChecks
                 throw new InvalidDataException("Only HTTP/HTTPS notes expose an explicit Open link action.");
             passed++;
         }
+        // The Explorer send ring: one online paired PC, numbered, with the selection summed up in the middle.
+        app.Store.UpsertPeer(new()
+        {
+            Name = "Office PC",
+            Fingerprint = new string('B', 64),
+            Address = "192.168.1.20",
+            Port = 48585,
+            Paired = true,
+            KeyVerified = true,
+            LastSeenUtc = DateTime.UtcNow
+        });
+        string sample = Path.Combine(output, "ring-sample.txt");
+        File.WriteAllText(sample, new string('x', 2048));
+        FrameworkElement ring = SendRing.Preview(app, [sample, output]);
+        ring.Measure(new(420, 420));
+        ring.Arrange(new Rect(0, 0, 420, 420));
+        ring.UpdateLayout();
+        RenderTargetBitmap ringShot = new(420, 420, 96, 96, PixelFormats.Pbgra32);
+        ringShot.Render(ring);
+        PngBitmapEncoder ringFile = new();
+        ringFile.Frames.Add(BitmapFrame.Create(ringShot));
+        using (FileStream shot = File.Create(Path.Combine(output, "Send-ring.png")))
+            ringFile.Save(shot);
+        if (Descendants<Button>(ring).Count(button => System.Windows.Automation.AutomationProperties.GetName(button) == "1. Send to Office PC, PC") != 1 || !Descendants<TextBlock>(ring).Any(text => text.Text == "Send 1 file, 1 folder"))
+            throw new InvalidDataException("The send ring must list the online paired PC by number and sum up the selection.");
+        passed++;
         File.WriteAllText(Path.Combine(output, "ui-checks.json"), JsonSerializer.Serialize(new
         {
             passed,

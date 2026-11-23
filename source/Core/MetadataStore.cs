@@ -137,6 +137,11 @@ public sealed class MetadataStore
             {
                 Theme = defaults.Theme
             };
+        if (!SendShortcut.Valid(loaded.SendShortcut))
+            loaded = loaded with
+            {
+                SendShortcut = defaults.SendShortcut
+            };
         if (string.IsNullOrEmpty(loaded.ReceiveFolder) || !Path.IsPathFullyQualified(loaded.ReceiveFolder))
             loaded = loaded with
             {
@@ -257,6 +262,8 @@ public sealed class MetadataStore
         CheckReceiveFolder(preferences.ReceiveFolder);
         if (preferences.Theme is not ("Light" or "Dark" or "System"))
             throw new InvalidDataException("Choose Light, Dark, or System theme.");
+        if (!SendShortcut.Valid(preferences.SendShortcut))
+            throw new InvalidDataException("Choose Ctrl+Shift+S, Shift+S or Off for the send shortcut.");
         lock (gate)
             data.Preferences = preferences with
             {
