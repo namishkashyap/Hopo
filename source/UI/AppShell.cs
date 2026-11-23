@@ -68,6 +68,8 @@ internal sealed class AppShell : IDisposable
     private bool sharingStoppedManually;
     private string networkSignature = "";
     private readonly DispatcherTimer networkTimer = new() { Interval = TimeSpan.FromSeconds(10) };
+    // Transfers, discovery and phones report many times a second; the page catches up at most four times a second.
+    private readonly DispatcherTimer later = new() { Interval = TimeSpan.FromMilliseconds(250) };
     public AppShell(MetadataStore store, Identity identity, bool preview)
     {
         Store = store;
@@ -98,6 +100,7 @@ internal sealed class AppShell : IDisposable
             Window.Icon = BitmapFrame.Create(icon, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
         if (!preview)
         {
+            WindowsIntegration.ProcessIdentity(AdminApp);
             Window.SourceInitialized += (_, _) => WindowsIntegration.Taskbar(new System.Windows.Interop.WindowInteropHelper(Window).Handle, Environment.ProcessPath ?? "", AdminApp);
             Window.MinWidth = Math.Min(1000, Math.Max(760, SystemParameters.WorkArea.Width - 20));
             Window.MinHeight = Math.Min(720, Math.Max(520, SystemParameters.WorkArea.Height - 20));
@@ -109,14 +112,15 @@ internal sealed class AppShell : IDisposable
         Engine.ApprovePair = Dialogs.CompareAsync;
         Engine.ApproveReceive = (request, token) => { Ui(() => NotifyIncoming(request)); return Dialogs.ReceiveAsync(request, token); };
         Engine.ApproveSync = Dialogs.SyncAsync;
-        Engine.SyncChanged += () => Ui(() => { if (CurrentPage == "Sync") page?.Refresh(); });
-        Engine.Browser.Notes.Changed += () => Ui(() => { if (CurrentPage == "Text & links") page?.Refresh(); });
-        Engine.Sync.Changed += () => Ui(() => { if (CurrentPage == "Sync") page?.Refresh(); });
+        later.Tick += (_, _) => { later.Stop(); page?.Refresh(); };
+        Engine.SyncChanged += () => Ui(() => { if (CurrentPage == "Sync") Later(); });
+        Engine.Browser.Notes.Changed += () => Ui(() => { if (CurrentPage == "Text & links") Later(); });
+        Engine.Sync.Changed += () => Ui(() => { if (CurrentPage == "Sync") Later(); });
         Engine.Status += message => Ui(() => Tell(message));
-        Engine.PeersChanged += () => Ui(() => { RefreshExplorerMenu(); if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces") page?.Refresh(); });
-        Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home") page?.Refresh(); if (CurrentPage is "Send") page?.Refresh(); if (!preview && Engine.Running) _ = Firewall.EnsureAsync(); });
+        Engine.PeersChanged += () => Ui(() => { RefreshExplorerMenu(); if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces") Later(); });
+        Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home" or "Send") Later(); if (!preview && Engine.Running) _ = Firewall.EnsureAsync(); });
         Engine.Browser.ApprovalRequested += device => Ui(() => NotifyWaiting(device));
-        Engine.Transfers.Changed += record => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") page?.Refresh(); });
+        Engine.Transfers.Changed += record => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") Later(); });
         Engine.Transfers.PersistenceFailed += _ => Ui(() => Tell("History could not be saved. Check free space and permissions in the app's local metadata folder."));
         Engine.Completed += record => Ui(() =>
         {
@@ -427,6 +431,7 @@ internal sealed class AppShell : IDisposable
             Motion.Enter(page.View);
     }
     public void RefreshPage() => page?.Refresh();
+    private void Later() => later.IsEnabled = true;
     public void OpenBrowser(string relative = "/")
     {
         if (!Store.Preferences.BrowserSharingEnabled)
@@ -724,6 +729,7 @@ internal sealed class AppShell : IDisposable
             return;
         disposed = true;
         networkTimer.Stop();
+        later.Stop();
         if (!preview)
             SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
         Engine.Dispose();

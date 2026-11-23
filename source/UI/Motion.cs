@@ -54,6 +54,13 @@ internal static class Motion
         EventManager.RegisterClassHandler(typeof(Button), UIElement.PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((sender, _) => Press((Button)sender, true)), true);
         EventManager.RegisterClassHandler(typeof(Button), UIElement.PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler((sender, _) => Press((Button)sender, false)), true);
     }
+    /// <summary>Endless background motion at 30 frames a second, which looks the same for slow movement and leaves the rest of the time to the app. Call the returned action to stop it: an endless animation keeps running, and keeps its element alive, after the element leaves the window.</summary>
+    public static Action Loop(IAnimatable target, DependencyProperty property, AnimationTimeline animation)
+    {
+        Timeline.SetDesiredFrameRate(animation, 30);
+        target.BeginAnimation(property, animation);
+        return () => target.BeginAnimation(property, null);
+    }
     private static bool Springs(Button button) => button.Style != button.TryFindResource("Plain") as Style && button.Focusable && button.IsEnabled;
     private static (ScaleTransform Scale, RotateTransform Rotate) Transforms(UIElement element)
     {
@@ -147,7 +154,7 @@ internal static class Motion
             EasingMode = EasingMode.EaseInOut
         };
         foreach ((Animatable target, DependencyProperty property, double value) in new (Animatable, DependencyProperty, double)[] { (move, TranslateTransform.XProperty, x * glow.Width), (move, TranslateTransform.YProperty, y * glow.Height), (grow, ScaleTransform.ScaleXProperty, scale), (grow, ScaleTransform.ScaleYProperty, scale) })
-            target.BeginAnimation(property, new DoubleAnimation(value, TimeSpan.FromSeconds(seconds)) { EasingFunction = ease, AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
+            Loop(target, property, new DoubleAnimation(value, TimeSpan.FromSeconds(seconds)) { EasingFunction = ease, AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
     }
     /// <summary>Menu opens out of the menu button: scale .1 to 1 (visible by 40%), rows fade up 6 px from 0.12 s, 0.04 s apart.</summary>
     public static void OpenMenu(FrameworkElement scrim, FrameworkElement panel, IEnumerable<UIElement> rows)
@@ -194,9 +201,12 @@ internal static class Motion
             GradientStops = { new(edge, 0), new(edge, 0.35), new(light, 0.48), new(edge, 0.6), new(edge, 1) },
             RelativeTransform = new TranslateTransform()
         };
+        // A theme change makes a new edge, so stop the old one.
+        if (resources.Contains("GlassEdge") && resources["GlassEdge"] is LinearGradientBrush { RelativeTransform: TranslateTransform old } && !old.IsFrozen)
+            old.BeginAnimation(TranslateTransform.XProperty, null);
         // The window's resources freeze a brush when it is added, so start the animation first (an animated brush cannot be frozen).
         if (On)
-            ((TranslateTransform)sweep.RelativeTransform).BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0.7, -0.7, TimeSpan.FromSeconds(9)) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }, RepeatBehavior = RepeatBehavior.Forever });
+            Loop((TranslateTransform)sweep.RelativeTransform, TranslateTransform.XProperty, new DoubleAnimation(0.7, -0.7, TimeSpan.FromSeconds(9)) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }, RepeatBehavior = RepeatBehavior.Forever });
         resources["GlassEdge"] = sweep;
     }
 }

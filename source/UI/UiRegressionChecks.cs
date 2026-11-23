@@ -177,8 +177,10 @@ internal static class UiRegressionChecks
         app.Engine.Browser.Notes.Add("<img src=x onerror=alert(1)>\nReceived as plain text.", "Family PC");
         app.Engine.Browser.Notes.Add("https://example.com/family", "Phone / browser");
         app.Engine.Browser.Notes.Add("javascript:alert(1)", "Family PC");
-        // Offscreen checks have no Application.Run loop; process the same queued refreshes as a live window.
-        app.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        // Offscreen checks have no Application.Run loop; run the dispatcher until the batched page refresh (at most every 250 ms) has happened, as a live window would.
+        System.Windows.Threading.DispatcherFrame batch = new();
+        new System.Windows.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(400), System.Windows.Threading.DispatcherPriority.ApplicationIdle, (timer, _) => { ((System.Windows.Threading.DispatcherTimer)timer!).Stop(); batch.Continue = false; }, app.Window.Dispatcher).Start();
+        System.Windows.Threading.Dispatcher.PushFrame(batch);
         if (noteDraft.Text != "Keep my unfinished note 😀")
             throw new InvalidDataException("Incoming notes must preserve a typed draft.");
         passed++;
