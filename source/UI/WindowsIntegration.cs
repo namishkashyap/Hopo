@@ -117,6 +117,10 @@ internal sealed class WindowsIntegration
     /// Gives the window its own taskbar identity: app ID, relaunch command, the name "hopo" and the exe's icon. The Explorer
     /// package (1.9.0.0) would otherwise lend the process its old Lantoss logo, so taskbar buttons and new pins use these instead.
     /// </summary>
+    /// <summary>The taskbar identity; the installer's shortcuts carry the same one, so Windows ties the window to its shortcut and icon.</summary>
+    public static string AppId(bool admin) => admin ? "hopo.Admin" : "hopo.LocalFileSharing";
+    /// <summary>Gives the whole process the window's taskbar identity before any window opens.</summary>
+    public static void ProcessIdentity(bool admin) => _ = SetCurrentProcessExplicitAppUserModelID(AppId(admin));
     public static void Taskbar(IntPtr window, string executable, bool admin = false)
     {
         Guid store = new("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
@@ -127,7 +131,7 @@ internal sealed class WindowsIntegration
             // Relaunch details must be set with the ID: 2 command, 3 icon, 4 display name, 5 app ID.
             // hopo Admin is a separate taskbar app; run as hopoUsers.exe --admin it relaunches the same way.
             string command = "\"" + executable + "\"" + (admin && Path.GetFileName(executable).Equals("hopoUsers.exe", StringComparison.OrdinalIgnoreCase) ? " --admin" : "");
-            foreach ((uint id, string value) in new[] { (2u, command), (3u, executable + ",0"), (4u, admin ? "hopo Admin" : "hopo Users"), (5u, admin ? "hopo.Admin" : "hopo.LocalFileSharing") })
+            foreach ((uint id, string value) in new[] { (2u, command), (3u, executable + ",0"), (4u, admin ? "hopo Admin" : "hopo Users"), (5u, AppId(admin)) })
             {
                 PropertyKey key = new()
                 {
@@ -149,6 +153,8 @@ internal sealed class WindowsIntegration
         }
         finally { Marshal.ReleaseComObject(properties); }
     }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
     [DllImport("shell32.dll")]
     private static extern int SHGetPropertyStoreForWindow(IntPtr window, ref Guid interfaceId, out IPropertyStore store);
     [StructLayout(LayoutKind.Sequential, Pack = 4)]

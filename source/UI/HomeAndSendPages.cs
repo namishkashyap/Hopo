@@ -1,7 +1,6 @@
 using System.Windows.Automation;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media.Animation;
-using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using Microsoft.Win32;
@@ -22,7 +21,14 @@ internal sealed class HomePage : IPage
     private readonly System.Windows.Shapes.Path[] lines = new System.Windows.Shapes.Path[Rings.Length], glows = new System.Windows.Shapes.Path[Rings.Length], halos = new System.Windows.Shapes.Path[Rings.Length];
     private readonly Point[] samples = new Point[180];
     // The floating "Waiting for approval" card: bottom right of Home, above the dock line, only while a phone or browser waits.
-    private readonly Border pending = new() { Width = 360, Padding = new(16), CornerRadius = new(18), BorderThickness = new(1), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new(0, 0, 24, 104), Visibility = Visibility.Collapsed, Effect = new DropShadowEffect { BlurRadius = 40, ShadowDepth = 14, Opacity = 0.4, Direction = 270, RenderingBias = RenderingBias.Performance } };
+    private readonly Border pending = new() { Width = 360, Padding = new(16), CornerRadius = new(18), BorderThickness = new(1) };
+    private readonly Grid pendingFrame;
+    // Endless animations, stopped when Home closes (ripples) or the devices are redrawn; the ring clock ticks only while Home is on screen.
+    private readonly List<Action> loops = [], deviceLoops = [];
+    private readonly TranslateTransform tick = new();
+    private readonly System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+    private bool running;
+    private string shownDevices = "", shownWaiting = "";
     private readonly Border sheetHost = new() { HorizontalAlignment = HorizontalAlignment.Center, Margin = new(0, 0, 0, 12) }, clickAway = new() { Background = Brushes.Transparent, Visibility = Visibility.Collapsed };
     private readonly Dictionary<string, Button> dock = [];
     private readonly TextBlock status = C.Text("", 12, "Muted");
@@ -116,9 +122,9 @@ internal sealed class HomePage : IPage
                 RepeatBehavior = RepeatBehavior.Forever,
                 BeginTime = begin
             };
-            grow.BeginAnimation(ScaleTransform.ScaleXProperty, spread);
-            grow.BeginAnimation(ScaleTransform.ScaleYProperty, spread);
-            ripple.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(12), RepeatBehavior = RepeatBehavior.Forever, BeginTime = begin, KeyFrames = { new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)), new LinearDoubleKeyFrame(0.45, KeyTime.FromPercent(0.18)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } });
+            loops.Add(Motion.Loop(grow, ScaleTransform.ScaleXProperty, spread));
+            loops.Add(Motion.Loop(grow, ScaleTransform.ScaleYProperty, spread.Clone()));
+            loops.Add(Motion.Loop(ripple, UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(12), RepeatBehavior = RepeatBehavior.Forever, BeginTime = begin, KeyFrames = { new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)), new LinearDoubleKeyFrame(0.45, KeyTime.FromPercent(0.18)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } }));
         }
         // A radial gradient, not a blurred shadow: the GPU blur drew a 60 px glow as a rounded square.
         RadialGradientBrush haze = new()
@@ -146,18 +152,24 @@ internal sealed class HomePage : IPage
         Ellipse beacon = new()
         {
             Width = 9,
-            Height = 9,
-            Margin = new(0, 0, 0, 6),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Effect = new DropShadowEffect { Color = Color.FromRgb(245, 181, 74), BlurRadius = 12, ShadowDepth = 0, Opacity = 0.8 }
+            Height = 9
         };
         beacon.SetResourceReference(Shape.FillProperty, "Accent");
+        Grid light = new()
+        {
+            Width = 21,
+            Height = 21,
+            Margin = new(0, -6, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
+        light.Children.Add(Glow(Color.FromRgb(245, 181, 74), 21, 0.8));
+        light.Children.Add(beacon);
         TextBlock name = C.Text(app.Store.Preferences.DeviceName, 14, bold: true), label = C.Text("This PC", 11, "Muted");
         name.TextAlignment = label.TextAlignment = TextAlignment.Center;
         name.TextTrimming = TextTrimming.CharacterEllipsis;
         name.TextWrapping = TextWrapping.NoWrap;
         name.MaxWidth = 128;
-        StackPanel center = C.Stack(beacon, name, C.Space(label, 0, 2));
+        StackPanel center = C.Stack(light, name, C.Space(label, 0, 2));
         center.VerticalAlignment = VerticalAlignment.Center;
         center.HorizontalAlignment = HorizontalAlignment.Center;
         self.Child = center;
@@ -181,8 +193,6 @@ internal sealed class HomePage : IPage
         }
         Border bar = C.Card(buttons, 8);
         bar.CornerRadius = new(18);
-        bar.Effect = new DropShadowEffect { BlurRadius = 60, ShadowDepth = 24, Opacity = 0.45, Direction = 270, RenderingBias = RenderingBias.Performance };
-        sheetHost.Effect = new DropShadowEffect { BlurRadius = 80, ShadowDepth = 30, Opacity = 0.5, Direction = 270, RenderingBias = RenderingBias.Performance };
         status.HorizontalAlignment = HorizontalAlignment.Center;
         StackPanel bottom = new()
         {
@@ -191,7 +201,7 @@ internal sealed class HomePage : IPage
             Margin = new(16, 0, 16, 18)
         };
         bottom.Children.Add(sheetHost);
-        bottom.Children.Add(bar);
+        bottom.Children.Add(C.Shadow(bar, 18, 60, 24, 0.45));
         bottom.Children.Add(C.Space(status, 0, 8));
         Grid field = new()
         {
@@ -219,15 +229,60 @@ internal sealed class HomePage : IPage
         pending.SetResourceReference(Border.BackgroundProperty, "Surface");
         pending.SetResourceReference(Border.BorderBrushProperty, "GlassEdge");
         AutomationProperties.SetName(pending, "Waiting for approval");
-        layout.Children.Add(pending);
+        pendingFrame = C.Shadow(pending, 18, 40, 14, 0.4);
+        pendingFrame.HorizontalAlignment = HorizontalAlignment.Right;
+        pendingFrame.VerticalAlignment = VerticalAlignment.Bottom;
+        pendingFrame.Margin = new(0, 0, 24, 104);
+        pendingFrame.Visibility = Visibility.Collapsed;
+        layout.Children.Add(pendingFrame);
         // Dropping files anywhere on Home adds them to the selection and opens the Send panel.
         AutomationProperties.SetName(layout, "Drop files or folders to prepare a transfer");
         layout.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
         layout.Drop += async (_, e) => { if (e.Data.GetData(DataFormats.FileDrop) is string[] paths) { await app.AddSelectionsAsync(paths, false); Open("send", animate: sheet != "send"); } e.Handled = true; };
-        layout.Loaded += (_, _) => { if (Motion.On) CompositionTarget.Rendering += Frame; };
-        layout.Unloaded += (_, _) => CompositionTarget.Rendering -= Frame;
+        tick.Changed += Frame;
+        layout.Loaded += (_, _) => { app.Window.IsVisibleChanged += Shown; app.Window.StateChanged += Resized; Run(); };
+        layout.Unloaded += (_, _) =>
+        {
+            app.Window.IsVisibleChanged -= Shown;
+            app.Window.StateChanged -= Resized;
+            Stop(loops);
+            Stop(deviceLoops);
+            Run();
+        };
         Motion.Rise(bar, 0.15, 26, 0.9);
         View = layout;
+    }
+    private void Shown(object sender, DependencyPropertyChangedEventArgs e) => Run();
+    private void Resized(object? sender, EventArgs e) => Run();
+    /// <summary>The rings move only while Home is on screen: not when it is closed, the window is minimised or hopo is in the tray.</summary>
+    private void Run()
+    {
+        bool on = Motion.On && View is { IsLoaded: true } && app.Window.IsVisible && app.Window.WindowState != WindowState.Minimized;
+        if (on == running)
+            return;
+        running = on;
+        last = -1;
+        // A slow animation is the clock, so the rings redraw with the rest of the window at 30 frames a second instead of on every screen refresh.
+        if (on)
+            Motion.Loop(tick, TranslateTransform.XProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever });
+        else
+            tick.BeginAnimation(TranslateTransform.XProperty, null);
+    }
+    private static void Stop(List<Action> stops)
+    {
+        foreach (Action stop in stops)
+            stop();
+        stops.Clear();
+    }
+    /// <summary>A soft round glow: a gradient, which costs nothing to redraw, unlike a blur.</summary>
+    private static Ellipse Glow(Color color, double size, double strength)
+    {
+        RadialGradientBrush fill = new()
+        {
+            GradientStops = { new(Color.FromArgb((byte)(strength * 255), color.R, color.G, color.B), 0.2), new(Color.FromArgb((byte)(strength * 90), color.R, color.G, color.B), 0.5), new(Color.FromArgb(0, color.R, color.G, color.B), 1) }
+        };
+        fill.Freeze();
+        return new Ellipse { Width = size, Height = size, Fill = fill, IsHitTestVisible = false };
     }
     private static T Frozen<T>(T value) where T : Freezable
     {
@@ -242,9 +297,7 @@ internal sealed class HomePage : IPage
     }
     private void Frame(object? sender, EventArgs e)
     {
-        double now = ((RenderingEventArgs)e).RenderingTime.TotalSeconds;
-        if (now == last)
-            return;
+        double now = watch.Elapsed.TotalSeconds;
         if (last >= 0)
         {
             // Follow the pointer over about half a second, so the slow-down and swell never jump, then play at the design's rate, 1 − .75 × proximity.
@@ -293,13 +346,48 @@ internal sealed class HomePage : IPage
     }
     public void Refresh()
     {
-        devices.Children.Clear();
         // Only devices on the network right now; offline PCs are listed under Past connections. Users see paired PCs only.
         Peer[] allPeers = app.Engine.Peers.Where(p => p.Online && !p.Blocked && (app.Admin || p.Paired) && p.Name.Contains(app.Search, StringComparison.OrdinalIgnoreCase)).OrderBy(p => p.Name).ToArray(), peers = allPeers.Take(8).ToArray();
         BrowserDevice[] allBrowsers = app.Engine.Browser.Browsers.Where(b => b.Approved && b.Label.Contains(app.Search, StringComparison.OrdinalIgnoreCase)).ToArray(), browsers = allBrowsers.Take(6).ToArray();
-        int count = peers.Length + browsers.Length, index = 0;
+        int count = peers.Length + browsers.Length;
         // The rings hold 8 PCs and 6 phones; the rest are counted, not silently left out.
         int more = allPeers.Length + allBrowsers.Length - count;
+        // Redraw the devices only when they change, not on every transfer progress tick.
+        string shown = string.Join("\n", peers.Select(p => string.Join("\t", p.Fingerprint, p.Name, p.Paired, p.Address, p.TrustLabel)).Concat(browsers.Select(b => string.Join("\t", b.Handle, b.Label, b.Address))).Append(string.Join("\t", more, app.Search, app.EffectiveTheme)));
+        if (shown != shownDevices)
+            Devices(peers, browsers, count, more, shown);
+        double speed = app.Engine.Transfers.Records.Where(r => !r.Terminal).Sum(r => r.BytesPerSecond);
+        status.Text = speed > 0 ? $"{speed / 1048576:0.0} MB/s transferring" : "";
+        status.Visibility = speed > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BrowserDevice[] waiting = app.Engine.Browser.Devices.Where(b => !b.Approved).ToArray();
+        string asking = string.Join("\n", waiting.Select(b => string.Join("\t", b.Handle, b.Label, b.Address)));
+        bool appearing = waiting.Length > 0 && pendingFrame.Visibility != Visibility.Visible;
+        pendingFrame.Visibility = waiting.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (waiting.Length > 0 && asking != shownWaiting)
+        {
+            Border badge = C.Badge(waiting.Length.ToString(), "Danger", "DangerSoft");
+            DockPanel.SetDock(badge, Dock.Right);
+            DockPanel heading = new()
+            {
+                Margin = new(0, 0, 0, 10)
+            };
+            heading.Children.Add(badge);
+            heading.Children.Add(C.Text("Waiting for approval", 14, bold: true));
+            pending.Child = C.Stack(heading, Approvals(false));
+            if (appearing)
+                Motion.Rise(pendingFrame, 0, 16, 0.5);
+        }
+        shownWaiting = asking;
+        // Keep an open Phone panel in step with phones arriving or being allowed.
+        if (sheet == "phone")
+            Open("phone", animate: false);
+    }
+    private void Devices(Peer[] peers, BrowserDevice[] browsers, int count, int more, string shown)
+    {
+        shownDevices = shown;
+        Stop(deviceLoops);
+        devices.Children.Clear();
+        int index = 0;
         if (more > 0)
         {
             Button rest = C.Small($"+{more} more", () => app.Navigate(app.Admin ? "Devices" : "Send"));
@@ -321,29 +409,6 @@ internal sealed class HomePage : IPage
             card.Width = 400;
             Place(devices, card, Middle - 200, Middle + 100);
         }
-        double speed = app.Engine.Transfers.Records.Where(r => !r.Terminal).Sum(r => r.BytesPerSecond);
-        status.Text = speed > 0 ? $"{speed / 1048576:0.0} MB/s transferring" : "";
-        status.Visibility = speed > 0 ? Visibility.Visible : Visibility.Collapsed;
-        int waiting = app.Engine.Browser.Devices.Count(b => !b.Approved);
-        bool appearing = waiting > 0 && pending.Visibility != Visibility.Visible;
-        pending.Visibility = waiting > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (waiting > 0)
-        {
-            Border badge = C.Badge(waiting.ToString(), "Danger", "DangerSoft");
-            DockPanel.SetDock(badge, Dock.Right);
-            DockPanel heading = new()
-            {
-                Margin = new(0, 0, 0, 10)
-            };
-            heading.Children.Add(badge);
-            heading.Children.Add(C.Text("Waiting for approval", 14, bold: true));
-            pending.Child = C.Stack(heading, Approvals(false));
-            if (appearing)
-                Motion.Rise(pending, 0, 16, 0.5);
-        }
-        // Keep an open Phone panel in step with phones arriving or being allowed.
-        if (sheet == "phone")
-            Open("phone", animate: false);
     }
     /// <summary>Waiting phones and browsers with Allow (plus Always allow and Block in hopo Admin). With <paramref name="connected"/>, hopo Admin also lists allowed phones that are not trusted yet.</summary>
     private StackPanel Approvals(bool connected)
@@ -395,14 +460,21 @@ internal sealed class HomePage : IPage
         }, core = new()
         {
             Width = 10,
-            Height = 10,
-            RenderTransformOrigin = new(0.5, 0.5),
-            RenderTransform = pulse,
-            Effect = new DropShadowEffect { Color = tint, BlurRadius = 16, ShadowDepth = 0, Opacity = 0.9 }
+            Height = 10
         };
         ping.SetResourceReference(Shape.StrokeProperty, color);
         halo.SetResourceReference(Shape.FillProperty, color);
         core.SetResourceReference(Shape.FillProperty, color);
+        // The dot and its glow blink together.
+        Grid light = new()
+        {
+            Width = 30,
+            Height = 30,
+            RenderTransformOrigin = new(0.5, 0.5),
+            RenderTransform = pulse
+        };
+        light.Children.Add(Glow(tint, 30, 0.9));
+        light.Children.Add(core);
         Grid dot = new()
         {
             Width = 44,
@@ -410,7 +482,7 @@ internal sealed class HomePage : IPage
         };
         dot.Children.Add(ping);
         dot.Children.Add(halo);
-        dot.Children.Add(core);
+        dot.Children.Add(light);
         if (Motion.On)
         {
             // Blink and ping on the design's 3.8 s beat, each device at its own point of the beat.
@@ -419,7 +491,7 @@ internal sealed class HomePage : IPage
             {
                 EasingMode = EasingMode.EaseInOut
             };
-            core.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0.4, 1, TimeSpan.FromSeconds(1.9)) { EasingFunction = smooth, AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, BeginTime = begin });
+            deviceLoops.Add(Motion.Loop(light, UIElement.OpacityProperty, new DoubleAnimation(0.4, 1, TimeSpan.FromSeconds(1.9)) { EasingFunction = smooth, AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, BeginTime = begin }));
             DoubleAnimation beat = new(0.85, 1, TimeSpan.FromSeconds(1.9))
             {
                 EasingFunction = smooth,
@@ -427,8 +499,8 @@ internal sealed class HomePage : IPage
                 RepeatBehavior = RepeatBehavior.Forever,
                 BeginTime = begin
             };
-            pulse.BeginAnimation(ScaleTransform.ScaleXProperty, beat);
-            pulse.BeginAnimation(ScaleTransform.ScaleYProperty, beat);
+            deviceLoops.Add(Motion.Loop(pulse, ScaleTransform.ScaleXProperty, beat));
+            deviceLoops.Add(Motion.Loop(pulse, ScaleTransform.ScaleYProperty, beat.Clone()));
             DoubleAnimationUsingKeyFrames spread = new()
             {
                 Duration = TimeSpan.FromSeconds(3.8),
@@ -436,9 +508,9 @@ internal sealed class HomePage : IPage
                 BeginTime = begin,
                 KeyFrames = { new EasingDoubleKeyFrame(0.6, KeyTime.FromPercent(0)), new EasingDoubleKeyFrame(2.6, KeyTime.FromPercent(0.7), new QuadraticEase { EasingMode = EasingMode.EaseOut }), new EasingDoubleKeyFrame(2.6, KeyTime.FromPercent(1)) }
             };
-            echo.BeginAnimation(ScaleTransform.ScaleXProperty, spread);
-            echo.BeginAnimation(ScaleTransform.ScaleYProperty, spread);
-            ping.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(3.8), RepeatBehavior = RepeatBehavior.Forever, BeginTime = begin, KeyFrames = { new LinearDoubleKeyFrame(0.65, KeyTime.FromPercent(0)), new EasingDoubleKeyFrame(0, KeyTime.FromPercent(0.7), new QuadraticEase { EasingMode = EasingMode.EaseOut }), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } });
+            deviceLoops.Add(Motion.Loop(echo, ScaleTransform.ScaleXProperty, spread));
+            deviceLoops.Add(Motion.Loop(echo, ScaleTransform.ScaleYProperty, spread.Clone()));
+            deviceLoops.Add(Motion.Loop(ping, UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(3.8), RepeatBehavior = RepeatBehavior.Forever, BeginTime = begin, KeyFrames = { new LinearDoubleKeyFrame(0.65, KeyTime.FromPercent(0)), new EasingDoubleKeyFrame(0, KeyTime.FromPercent(0.7), new QuadraticEase { EasingMode = EasingMode.EaseOut }), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } }));
         }
         Button blip = new()
         {
@@ -592,22 +664,23 @@ internal sealed class HomePage : IPage
             "text" => TextSheet(),
             _ => PhoneSheet()
         };
-        sheetHost.Child = panel;
+        Grid frame = C.Shadow(panel, panel.CornerRadius.TopLeft, 80, 30, 0.5);
+        sheetHost.Child = frame;
         clickAway.Visibility = Visibility.Visible;
         MarkDock();
         if (!animate || !Motion.On)
             return;
         ScaleTransform scale = new(0.62, 0.5);
         TranslateTransform shift = new(0, 26);
-        panel.RenderTransformOrigin = new(key switch
+        frame.RenderTransformOrigin = new(key switch
         {
             "send" => 0.14,
             "folder" => 0.4,
             "text" => 0.61,
             _ => 0.84
         }, 1.08);
-        panel.RenderTransform = new TransformGroup { Children = { scale, shift } };
-        panel.Opacity = 0;
+        frame.RenderTransform = new TransformGroup { Children = { scale, shift } };
+        frame.Opacity = 0;
         DoubleAnimationUsingKeyFrames Keys(double from, double middle, double to) => new()
         {
             Duration = TimeSpan.FromSeconds(0.6),
@@ -616,7 +689,7 @@ internal sealed class HomePage : IPage
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, Keys(0.62, 1.006, 1));
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, Keys(0.5, 1.008, 1));
         shift.BeginAnimation(TranslateTransform.YProperty, Keys(26, -2, 0));
-        panel.BeginAnimation(UIElement.OpacityProperty, Keys(0, 1, 1));
+        frame.BeginAnimation(UIElement.OpacityProperty, Keys(0, 1, 1));
         if (panel.Child is Panel rows)
             foreach (UIElement row in rows.Children)
                 Motion.Rise(row, 0.14, 6, 0.45);

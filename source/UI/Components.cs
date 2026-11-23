@@ -83,6 +83,21 @@ internal static class C
         };
         return border;
     }
+    /// <summary>A soft shadow under <paramref name="child"/>, offset down by <paramref name="depth"/>: stacked see-through rounded layers instead of a blur, which WPF redraws every frame anything moves under it.</summary>
+    public static Grid Shadow(FrameworkElement child, double corner, double blur, double depth, double opacity)
+    {
+        const int steps = 8;
+        Grid frame = new();
+        SolidColorBrush shade = new(Color.FromArgb((byte)Math.Round(255 * (1 - Math.Pow(1 - opacity, 1.0 / steps))), 0, 0, 0));
+        shade.Freeze();
+        for (int i = steps; i >= 1; i--)
+        {
+            double grow = blur * (0.75 * i / steps - 0.25);
+            frame.Children.Add(new Border { Background = shade, IsHitTestVisible = false, CornerRadius = new(Math.Max(0, corner + grow)), Margin = new(-grow, depth - grow, -grow, -depth - grow) });
+        }
+        frame.Children.Add(child);
+        return frame;
+    }
     public static DockPanel Heading(string title, UIElement? right = null, double size = 16)
     {
         DockPanel panel = new()
