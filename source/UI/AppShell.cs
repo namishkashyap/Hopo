@@ -70,6 +70,7 @@ internal sealed class AppShell : IDisposable
     private readonly DispatcherTimer networkTimer = new() { Interval = TimeSpan.FromSeconds(10) };
     // Transfers, discovery and phones report many times a second; the page catches up at most four times a second.
     private readonly DispatcherTimer later = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private ShortcutWatcher? shortcut;
     public AppShell(MetadataStore store, Identity identity, bool preview)
     {
         Store = store;
@@ -101,6 +102,7 @@ internal sealed class AppShell : IDisposable
         if (!preview)
         {
             WindowsIntegration.ProcessIdentity(AdminApp);
+            UpdateShortcut();
             Window.SourceInitialized += (_, _) => WindowsIntegration.Taskbar(new System.Windows.Interop.WindowInteropHelper(Window).Handle, Environment.ProcessPath ?? "", AdminApp);
             Window.MinWidth = Math.Min(1000, Math.Max(760, SystemParameters.WorkArea.Width - 20));
             Window.MinHeight = Math.Min(720, Math.Max(520, SystemParameters.WorkArea.Height - 20));
@@ -432,6 +434,30 @@ internal sealed class AppShell : IDisposable
     }
     public void RefreshPage() => page?.Refresh();
     private void Later() => later.IsEnabled = true;
+    /// <summary>Starts, changes or stops the Explorer send shortcut to match the saved setting.</summary>
+    public void UpdateShortcut()
+    {
+        string setting = Store.Preferences.SendShortcut;
+        if (setting == SendShortcut.Off || preview)
+        {
+            shortcut?.Dispose();
+            shortcut = null;
+        }
+        else if (shortcut != null)
+            shortcut.Setting = setting;
+        else
+            shortcut = new(setting, explorer => Ui(() => SendRing.Open(this, explorer)));
+    }
+    /// <summary>A short message in the status line and, when notifications are on, from the tray.</summary>
+    public void Notice(string title, string text)
+    {
+        Tell(title + ". " + text);
+        if (notifications == null || !Store.Preferences.Notifications)
+            return;
+        notifications.BalloonTipTitle = title;
+        notifications.BalloonTipText = text;
+        notifications.ShowBalloonTip(4000);
+    }
     public void OpenBrowser(string relative = "/")
     {
         if (!Store.Preferences.BrowserSharingEnabled)
@@ -730,6 +756,7 @@ internal sealed class AppShell : IDisposable
         disposed = true;
         networkTimer.Stop();
         later.Stop();
+        shortcut?.Dispose();
         if (!preview)
             SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
         Engine.Dispose();

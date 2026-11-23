@@ -123,6 +123,14 @@ internal sealed class SettingsPage : IPage
             Content = "Keep receiving and syncing in the tray when I close the window",
             IsChecked = saved.CloseToTray
         };
+        ComboBox shortcut = new()
+        {
+            ItemsSource = SendShortcut.Choices,
+            SelectedItem = saved.SendShortcut,
+            Margin = new(0, 6, 0, 6),
+            IsEnabled = !app.Preview
+        };
+        AutomationProperties.SetName(shortcut, "Send shortcut in File Explorer");
         AutomationProperties.SetName(startup, "Launch hopo at sign-in");
         AutomationProperties.SetName(explorer, "Explorer sharing menu");
         CheckBox discovery = new()
@@ -191,16 +199,18 @@ internal sealed class SettingsPage : IPage
                 AutoConfigureFirewall = firewall.IsChecked == true,
                 CloseToTray = tray.IsChecked == true,
                 SenderFolders = senderFolders.IsChecked == true,
-                LocalName = address.Text
+                LocalName = address.Text,
+                SendShortcut = shortcut.SelectedItem as string ?? SendShortcut.Default
             });
             app.Engine.ApplySavedPreferences();
+            app.UpdateShortcut();
             if (firewall.IsChecked == true)
                 _ = app.Firewall.EnsureAsync(!saved.AutoConfigureFirewall);
             app.ApplyTheme(app.Store.Preferences.Theme);
             app.UpdateStatus();
             app.Tell("Preferences saved. Discovery changes apply now. Existing jobs keep their chosen destination.");
         }, true);
-        StackPanel general = C.Stack(C.Heading("General"), C.Text("Profile picture", 12, bold: true), C.Space(pictureRow, 18, 8), C.Text("Name shown to other devices", 12, bold: true), name, C.Space(C.Text("Appearance", 12, bold: true), 8), C.Space(C.Text("Choose System, Light, or Dark in the menu. Changes save immediately; System follows Windows automatically.", 12, "Muted"), 16), C.Space(startup, 7), C.Space(automatic, 7), C.Space(tray, 7), C.Space(explorer, 7), C.Space(C.Text("Share with hopo is in the right-click menu (on Windows 11, under Show more options). Choose a remembered PC or open the device picker.", 11, "Muted"), 12), C.Space(autoConnect, 7), C.Space(notifications, 12), save);
+        StackPanel general = C.Stack(C.Heading("General"), C.Text("Profile picture", 12, bold: true), C.Space(pictureRow, 18, 8), C.Text("Name shown to other devices", 12, bold: true), name, C.Space(C.Text("Appearance", 12, bold: true), 8), C.Space(C.Text("Choose System, Light, or Dark in the menu. Changes save immediately; System follows Windows automatically.", 12, "Muted"), 16), C.Space(startup, 7), C.Space(automatic, 7), C.Space(tray, 7), C.Space(explorer, 7), C.Space(C.Text("Share with hopo is in the right-click menu (on Windows 11, under Show more options). Choose a remembered PC or open the device picker.", 11, "Muted"), 12), C.Text("Send shortcut in File Explorer", 12, bold: true), shortcut, C.Space(C.Text("Select files in File Explorer or on the desktop and press it: your connected PCs and phones appear in a ring at the pointer. It only works in the file list, never while you type a name or search.", 11, "Muted"), 12), C.Space(autoConnect, 7), C.Space(notifications, 12), save);
         StackPanel transfers = C.Stack(C.Heading("Transfers"), C.Space(C.Text("Files are saved locally on this PC", 12, bold: true), 9), C.Space(folderText, 15), C.Space(folderPicker, 17), senderFolders,
             C.Space(C.Text("Manual transfers require approval. Linked-folder sync uses its separate one-time host permission. Keep both is the default for manual duplicates.", 12, "Muted"), 15), C.Text("Closing the window keeps the server running when the tray option is enabled. Use Exit hopo in the tray to stop it. Transfer pause/resume and bandwidth limits are not included.", 11, "Muted"));
         NetworkAdapter[] available = NetworkAdapter.Available();
