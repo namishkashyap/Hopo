@@ -29,7 +29,9 @@ try {
 } finally { $certificate.Dispose() }
 $windres = Join-Path (Split-Path -Parent $CompilerPath) 'windres.exe'
 $resource = Join-Path $build 'explorer-resource.o'
-Invoke-Checked $windres @((Join-Path $PSScriptRoot 'LantossExplorer.rc'),'-O','coff','-o',$resource)
+# windres starts its default preprocessor through an unquoted path, which breaks in folders with spaces; name it through PATH instead.
+$env:PATH = (Split-Path -Parent $CompilerPath) + ';' + $env:PATH
+Invoke-Checked $windres @('--preprocessor=gcc','--preprocessor-arg=-E','--preprocessor-arg=-xc','--preprocessor-arg=-DRC_INVOKED',(Join-Path $PSScriptRoot 'LantossExplorer.rc'),'-O','coff','-o',$resource)
 $common = @('-O2','-std=c++17','-Wall','-Wextra','-Werror','-Wl,--dynamicbase','-Wl,--nxcompat','-Wl,--high-entropy-va','-static-libgcc','-static-libstdc++','-lole32','-lshell32','-lshlwapi','-luuid','-ladvapi32')
 $dll = Join-Path $app 'LantossExplorer.dll'
 Invoke-Checked $CompilerPath (@((Join-Path $PSScriptRoot 'LantossExplorer.cpp'),(Join-Path $PSScriptRoot 'LantossExplorer.def'),$resource,'-shared') + $common + @('-o',$dll))
@@ -40,13 +42,19 @@ if (-not $NoTimestamp) { $signing += @('/tr','http://timestamp.digicert.com','/t
 if ($SigningPassword) { $signing += @('/p',$SigningPassword) }
 Invoke-Checked $sign ($signing + @($dll))
 
-# Identity-only package: binaries and logos resolve from the MSI's external install directory.
-$sparse = Join-Path $build 'sparse'
-New-Item -ItemType Directory -Force $sparse | Out-Null
-Copy-Item (Join-Path $PSScriptRoot 'AppxManifest.xml') (Join-Path $sparse 'AppxManifest.xml') -Force
-$msix = Join-Path $app 'Lantoss.Explorer.msix'
-Invoke-Checked (Join-Path $SdkToolsPath 'makeappx.exe') @('pack','/d',$sparse,'/p',$msix,'/nv','/o')
-Invoke-Checked $sign ($signing + @($msix))
+# Identity-only packages, one per app: binaries and logos resolve from that app's install folder. Each has its own name and COM class.
+$template = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'AppxManifest.xml'))
+foreach ($variant in @(
+    @{Name='Lantoss.ExplorerIntegration';Display='hopo Users';Executable='hopoUsers.exe';Clsid='18F23026-095D-4FD5-AEF4-7DDF06847DE9'},
+    @{Name='Lantoss.ExplorerIntegration.Admin';Display='hopo Admin';Executable='hopoAdmin.exe';Clsid='E490B416-B223-4FAA-844C-069223D2F73F'})) {
+    $sparse = Join-Path $build ('sparse-'+$variant.Name)
+    New-Item -ItemType Directory -Force $sparse | Out-Null
+    $manifest = $template.Replace('{Name}',$variant.Name).Replace('{Version}','2.6.3.0').Replace('{Display}',$variant.Display).Replace('{Executable}',$variant.Executable).Replace('{Clsid}',$variant.Clsid)
+    [IO.File]::WriteAllText((Join-Path $sparse 'AppxManifest.xml'),$manifest)
+    $msix = Join-Path $app ([IO.Path]::GetFileNameWithoutExtension($variant.Executable)+'.Explorer.msix')
+    Invoke-Checked (Join-Path $SdkToolsPath 'makeappx.exe') @('pack','/d',$sparse,'/p',$msix,'/nv','/o')
+    Invoke-Checked $sign ($signing + @($msix))
+}
 Copy-Item (Join-Path $PSScriptRoot 'RegisterPackage.ps1') (Join-Path $app 'RegisterPackage.ps1') -Force
 Add-Type -AssemblyName System.Drawing
 $assets = Join-Path $app 'Assets'

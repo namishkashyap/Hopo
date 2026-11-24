@@ -1,21 +1,34 @@
 param(
     [string]$DotnetPath = 'dotnet',
     [string]$BuildRoot = '',
-    [switch]$SkipPublish
+    [switch]$SkipPublish,
+    # The Windows 11 menu tools and private signing key (see SETUP.md); by default under work\.
+    [string]$CompilerPath = '',
+    [string]$SdkToolsPath = '',
+    [string]$SigningCertificatePath = ''
 )
 $ErrorActionPreference = 'Stop'
 $lantossRelease = Split-Path -Parent $PSScriptRoot
 if (-not $BuildRoot) { $BuildRoot = Join-Path $lantossRelease 'work' }
 $lantossBuild = [IO.Path]::GetFullPath($BuildRoot)
 New-Item -ItemType Directory -Force -Path $lantossBuild | Out-Null
+# Build the Windows 11 menu first: it writes the public certificate that the app embeds.
+if (-not $CompilerPath) { $CompilerPath = Join-Path $lantossBuild 'explorer-tools\w64devkit\bin\g++.exe' }
+if (-not $SdkToolsPath) { $SdkToolsPath = Join-Path $lantossBuild 'explorer-tools\sdk' }
+if (-not $SigningCertificatePath) { $SigningCertificatePath = Join-Path $lantossBuild 'explorer-signing\hopo-explorer.pfx' }
+$lantossKeyPassword = Join-Path (Split-Path -Parent $SigningCertificatePath) 'password.txt'
+if (-not $env:LANTOSS_PFX_PASSWORD -and (Test-Path -LiteralPath $lantossKeyPassword)) { $env:LANTOSS_PFX_PASSWORD = [IO.File]::ReadAllText($lantossKeyPassword).Trim() }
+& (Join-Path $lantossRelease 'source\Explorer\build-explorer.ps1') -CompilerPath $CompilerPath -SdkToolsPath $SdkToolsPath -SigningCertificatePath $SigningCertificatePath -NoTimestamp -RunTests -BuildRoot (Join-Path $lantossBuild 'explorer')
 if (-not $SkipPublish) {
     & (Join-Path $lantossRelease 'source\build.ps1') -Mode Publish -DotnetPath $DotnetPath -BuildRoot $lantossBuild
     if ($LASTEXITCODE) { throw 'App publication failed.' }
 }
-# The Windows 11 package is no longer shipped (it can only start Lantoss.exe); its script stays only to remove packages left by hopo 2.3 and earlier.
+foreach ($lantossPayload in @('LantossExplorer.dll','hopoUsers.Explorer.msix','hopoAdmin.Explorer.msix','RegisterPackage.ps1','Assets\Logo.png','Assets\SmallLogo.png')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $lantossRelease ('app\'+$lantossPayload)))) { throw ('The Windows 11 menu build is missing '+$lantossPayload) }
+}
 Copy-Item -LiteralPath (Join-Path $lantossRelease 'source\Explorer\RegisterPackage.ps1') -Destination (Join-Path $lantossRelease 'app\RegisterPackage.ps1') -Force
 foreach ($lantossExe in @('hopoUsers.exe','hopoAdmin.exe')) {
-    if ((Get-Item (Join-Path $lantossRelease ('app\'+$lantossExe))).VersionInfo.FileVersion -ne '2.6.2.0') { throw ('Publish '+$lantossExe+' 2.6.2 first.') }
+    if ((Get-Item (Join-Path $lantossRelease ('app\'+$lantossExe))).VersionInfo.FileVersion -ne '2.6.3.0') { throw ('Publish '+$lantossExe+' 2.6.3 first.') }
 }
 
 # Build-only tools are pinned and hash checked. No compiler or installer is installed on the host.
@@ -40,7 +53,7 @@ $lantossWix = Join-Path $lantossTools 'wix\tools\net6.0\any\wix.dll'
 $lantossUI = Join-Path $lantossTools 'wixtoolset.ui.wixext\wixext4\WixToolset.UI.wixext.dll'
 # One setup per app, so each person installs only hopo Users or hopo Admin.
 foreach ($lantossApp in @('Users','Admin')) {
-    $lantossMsi = Join-Path $lantossRelease ('hopo-'+$lantossApp+'-Setup-2.6.2-x64.msi')
+    $lantossMsi = Join-Path $lantossRelease ('hopo-'+$lantossApp+'-Setup-2.6.3-x64.msi')
     & $DotnetPath $lantossWix build (Join-Path $PSScriptRoot 'Lantoss.wxs') -arch x64 -ext $lantossUI -d ('ReleaseDir='+$lantossRelease) -d ('App='+$lantossApp) -out $lantossMsi -intermediatefolder (Join-Path $lantossBuild ('installer-objects-'+$lantossApp)) -pdbtype none -wx
     if ($LASTEXITCODE) { throw 'MSI compilation or validation failed.' }
     Get-FileHash -LiteralPath $lantossMsi -Algorithm SHA256

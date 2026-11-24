@@ -20,7 +20,7 @@ function Read-LantossTable([string]$query,[int]$columns) {
 $props = Read-LantossTable 'SELECT `Property`,`Value` FROM `Property`' 2
 $properties = @{}
 foreach ($row in $props) { $properties[$row[0]]=$row[1] }
-if ($properties['ProductVersion'] -ne '2.6.2' -or $properties['ProductName'] -ne $lantossName -or $properties['ALLUSERS']) { throw 'Not the intended per-user package.' }
+if ($properties['ProductVersion'] -ne '2.6.3' -or $properties['ProductName'] -ne $lantossName -or $properties['ALLUSERS']) { throw 'Not the intended per-user package.' }
 $features = Read-LantossTable 'SELECT `Feature`,`Level` FROM `Feature`' 2
 foreach ($expected in @(@('Core','1'),@('Explorer','1'),@('Startup','2'),@('Desktop','2'))) {
     if (-not ($features | Where-Object { $_[0] -eq $expected[0] -and $_[1] -eq $expected[1] })) { throw ('Feature default mismatch: '+$expected[0]) }
@@ -30,7 +30,8 @@ if ($registry | Where-Object { $_[0] -ne '1' }) { throw 'Registration must be cu
 if (-not ($registry | Where-Object { $_[1] -eq 'Software\Microsoft\Windows\CurrentVersion\Run' -and $_[2] -eq $lantossRun -and $_[3] -eq '"[#AppExe]" --background' })) { throw 'Startup command mismatch.' }
 if ($registry | Where-Object { $_[2] -eq 'MUIVerb' }) { throw 'Installer must not add legacy-only menu verbs.' }
 $modern = Read-LantossTable 'SELECT `Action`,`Target` FROM `CustomAction`' 2
-if ($modern | Where-Object { $_[0] -eq 'RegisterExplorerPackage' }) { throw 'The Windows 11 package can only start Lantoss.exe and must not be registered.' }
+if (-not ($modern | Where-Object { $_[0] -eq 'RegisterExplorerPackage' -and $_[1] -eq '--install-integration' })) { throw 'The Windows 11 menu package is not registered by setup.' }
+if (-not ($modern | Where-Object { $_[0] -eq 'RemoveExplorerPackage' -and $_[1] -eq '--remove-explorer-package' })) { throw 'Removing the Explorer feature must remove its Windows 11 package.' }
 if (-not ($modern | Where-Object { $_[0] -eq 'RemoveOldExplorerPackage' -and $_[1] -eq '--remove-explorer-package' })) { throw 'Old Windows 11 package cleanup is missing.' }
 $shortcuts = Read-LantossTable 'SELECT `Name`,`Target`,`Arguments` FROM `Shortcut`' 3
 if (-not ($shortcuts | Where-Object { $_[2] -eq '--background' })) { throw 'Missing sharing-server shortcut.' }
@@ -43,4 +44,5 @@ $events = Read-LantossTable 'SELECT `Dialog_`,`Control_`,`Event`,`Argument`,`Ord
 if (-not ($events | Where-Object { $_[0] -eq 'WelcomeDlg' -and $_[1] -eq 'Next' -and $_[3] -eq 'CustomizeDlg' -and $_[4] -eq '5' })) { throw 'Installer feature-selection navigation missing.' }
 $files = Read-LantossTable 'SELECT `File`,`FileSize` FROM `File`' 2
 if (-not ($files | Where-Object { $_[0] -eq 'AppExe' -and [long]$_[1] -gt 10000000 })) { throw 'Missing standalone app payload.' }
+foreach ($menu in 'ExplorerDll','ExplorerMsix','ExplorerLogo','ExplorerSmallLogo') { if (-not ($files | Where-Object { $_[0] -eq $menu -and [long]$_[1] -gt 0 })) { throw ('Missing Windows 11 menu file: '+$menu) } }
 [pscustomobject]@{Product=$properties['ProductName'];Version=$properties['ProductVersion'];CurrentUserOnly=$true;Features=$features.Count;Files=$files.Count;Shortcuts=$shortcuts.Count;RegistryRows=$registry.Count;UninstallCleanupBeforeRemoveFiles=$true;Passed=$true} | ConvertTo-Json
