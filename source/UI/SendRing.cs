@@ -235,8 +235,9 @@ internal static class ExplorerSelection
 /// <summary>The device ring: a round window at the mouse pointer with the connected PCs and phones around it. The receiver still approves every send.</summary>
 internal sealed class SendRing
 {
-    private const double Size = 420, Middle = Size / 2, Orbit = 140;
-    // The Home ring colours: each device gets its own, and the orbit turns through all of them.
+    // Smaller than Home: the rings sit at 124 px, with room for a device and its name below the bottom one.
+    private const double Size = 360, Middle = Size / 2, Orbit = 124;
+    // The Home ring colours: each device gets its own.
     private static readonly Color[] Palette = [.. new[] { "#B57CFF", "#3FE0FF", "#3DF5A0", "#FF6AD5", "#F5B54A", "#6FB7FF", "#FF8A80", "#5CF0D0" }.Select(hex => (Color)ColorConverter.ConvertFromString(hex))];
     private static Window? open;
     private static bool opening;
@@ -248,6 +249,12 @@ internal sealed class SendRing
     private readonly List<Button> buttons = [];
     private readonly Window window;
     private bool closing;
+    // Explorer or the desktop gets the focus back when the ring closes, so hopo's own window never comes forward.
+    private IntPtr returnTo;
+    // The Home rings, smaller, on the same 30 fps clock.
+    private readonly WaveRings waves = new(Size, Orbit / 284, 0.6, 0.9, 2.5, 6);
+    private readonly TranslateTransform tick = new();
+    private readonly System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
     private SendRing(AppShell app, string[] paths)
     {
         this.app = app;
@@ -275,7 +282,7 @@ internal sealed class SendRing
             window.Resources[key] = app.Window.Resources[key];
         window.Content = Build();
         window.KeyDown += Pressed;
-        window.Deactivated += (_, _) => Close();
+        window.Deactivated += (_, _) => Close(false);
         window.Closed += (_, _) =>
         {
             foreach (Action stop in loops)
@@ -305,7 +312,10 @@ internal sealed class SendRing
             app.Tell("Select files or folders in File Explorer, then press " + app.Store.Preferences.SendShortcut + ".");
             return;
         }
-        SendRing ring = new(app, paths);
+        SendRing ring = new(app, paths)
+        {
+            returnTo = explorer
+        };
         open = ring.window;
         ring.Show();
     }
@@ -326,13 +336,13 @@ internal sealed class SendRing
         plate.SetResourceReference(Shape.StrokeProperty, "GlassEdge");
         Place(stage, plate, 4, 4);
         // A soft violet haze in the middle and a ripple that grows out of it every few seconds.
-        Ellipse haze = Glow(Palette[0], 250, 0.35);
-        Place(stage, haze, Middle - 125, Middle - 125);
+        Ellipse haze = Glow(Palette[0], 210, 0.35);
+        Place(stage, haze, Middle - 105, Middle - 105);
         ScaleTransform spread = new(0.45, 0.45);
         Ellipse ripple = new()
         {
-            Width = 220,
-            Height = 220,
+            Width = 180,
+            Height = 180,
             StrokeThickness = 1.5,
             Stroke = new SolidColorBrush(Palette[1]),
             Opacity = 0,
@@ -340,45 +350,15 @@ internal sealed class SendRing
             RenderTransformOrigin = new(0.5, 0.5),
             RenderTransform = spread
         };
-        Place(stage, ripple, Middle - 110, Middle - 110);
-        // The orbit turns slowly through the Home ring colours; a dotted ring outside it turns the other way.
-        LinearGradientBrush rainbow = new()
-        {
-            StartPoint = new(0, 0),
-            EndPoint = new(1, 1)
-        };
-        for (int i = 0; i <= Palette.Length; i++)
-            rainbow.GradientStops.Add(new(Palette[i % Palette.Length], (double)i / Palette.Length));
-        rainbow.Freeze();
-        Grid orbit = new()
-        {
-            Width = Orbit * 2,
-            Height = Orbit * 2,
-            IsHitTestVisible = false,
-            RenderTransformOrigin = new(0.5, 0.5),
-            RenderTransform = new RotateTransform()
-        };
-        orbit.Children.Add(new Ellipse { Stroke = rainbow, StrokeThickness = 10, Opacity = 0.2 });
-        orbit.Children.Add(new Ellipse { Stroke = rainbow, StrokeThickness = 2.5, Opacity = 0.95 });
-        Place(stage, orbit, Middle - Orbit, Middle - Orbit);
-        Ellipse dots = new()
-        {
-            Width = Orbit * 2 + 64,
-            Height = Orbit * 2 + 64,
-            Stroke = rainbow,
-            StrokeThickness = 1.5,
-            StrokeDashArray = [1, 7],
-            StrokeDashCap = PenLineCap.Round,
-            Opacity = 0.5,
-            IsHitTestVisible = false,
-            RenderTransformOrigin = new(0.5, 0.5),
-            RenderTransform = new RotateTransform()
-        };
-        Place(stage, dots, Middle - Orbit - 32, Middle - Orbit - 32);
+        Place(stage, ripple, Middle - 90, Middle - 90);
+        // Home's waving rings, spinning and morphing twice as fast as on Home so the motion reads at this size.
+        stage.Children.Add(waves.Glow);
+        stage.Children.Add(waves.Lines);
+        tick.Changed += (_, _) => waves.Draw(watch.Elapsed.TotalSeconds * 2, 0);
+        waves.Draw(0, 0);
         if (Motion.On)
         {
-            loops.Add(Motion.Loop((RotateTransform)orbit.RenderTransform, RotateTransform.AngleProperty, new DoubleAnimation(0, 360, TimeSpan.FromSeconds(16)) { RepeatBehavior = RepeatBehavior.Forever }));
-            loops.Add(Motion.Loop((RotateTransform)dots.RenderTransform, RotateTransform.AngleProperty, new DoubleAnimation(360, 0, TimeSpan.FromSeconds(40)) { RepeatBehavior = RepeatBehavior.Forever }));
+            loops.Add(Motion.Loop(tick, TranslateTransform.XProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever }));
             DoubleAnimation grow = new(0.45, 1.25, TimeSpan.FromSeconds(2.8))
             {
                 EasingFunction = Bezier.Ripple,
@@ -401,15 +381,28 @@ internal sealed class SendRing
         int files = paths.Count(File.Exists), folders = paths.Length - files;
         long bytes = paths.Where(File.Exists).Sum(path => new FileInfo(path).Length);
         string what = string.Join(", ", new[] { files > 0 ? files + (files == 1 ? " file" : " files") : "", folders > 0 ? folders + (folders == 1 ? " folder" : " folders") : "" }.Where(part => part.Length > 0));
-        TextBlock title = C.Text("Send " + what, 15, bold: true), detail = C.Text(files > 0 ? Amount(bytes) + (folders > 0 ? " plus folder contents" : "") : "Folder contents are counted when sent", 11, "Muted"), hint = C.Text(targets.Count == 0 ? "No PCs or phones are connected right now." : "Click a device or press its number. Esc closes.", 11, "Muted");
+        TextBlock title = C.Text("Send " + what, 13, bold: true), detail = C.Text(files > 0 ? Amount(bytes) + (folders > 0 ? " plus folders" : "") : "Folder contents are counted when sent", 11, "Muted"), hint = C.Text(targets.Count == 0 ? "No PCs or phones connected" : targets.Count == 1 ? "Click it or press 1" : "Click or press 1–" + targets.Count, 10, "Muted");
         foreach (TextBlock text in new[] { title, detail, hint })
         {
             text.TextAlignment = TextAlignment.Center;
-            text.MaxWidth = 190;
+            text.MaxWidth = 104;
+            text.TextWrapping = TextWrapping.Wrap;
         }
-        StackPanel center = C.Stack(C.Space(title, 4), C.Space(detail, 10), hint);
-        center.Width = 200;
-        Place(stage, center, Middle - 100, Middle - 46);
+        // A glass disc in the middle, like this PC on Home.
+        StackPanel center = C.Stack(C.Space(title, 3), C.Space(detail, 6), hint);
+        center.VerticalAlignment = VerticalAlignment.Center;
+        center.HorizontalAlignment = HorizontalAlignment.Center;
+        Border self = new()
+        {
+            Width = 124,
+            Height = 124,
+            CornerRadius = new(62),
+            BorderThickness = new(1),
+            Child = center
+        };
+        self.SetResourceReference(Border.BackgroundProperty, "Glass");
+        self.SetResourceReference(Border.BorderBrushProperty, "GlassEdge");
+        Place(stage, self, Middle - 62, Middle - 62);
         for (int i = 0; i < targets.Count; i++)
         {
             double angle = (-90 + i * 360.0 / targets.Count) * Math.PI / 180;
@@ -495,16 +488,16 @@ internal sealed class SendRing
         badge.Children.Add(disc);
         badge.Children.Add(letter);
         badge.Children.Add(number);
-        TextBlock label = C.Text(name, 12, bold: true), kind = C.Text(peer != null ? "PC" : "Phone", 10, "Muted");
-        label.TextAlignment = kind.TextAlignment = TextAlignment.Center;
+        TextBlock label = C.Text(name, 12, bold: true);
+        label.TextAlignment = TextAlignment.Center;
         label.TextWrapping = TextWrapping.NoWrap;
         label.TextTrimming = TextTrimming.CharacterEllipsis;
         Button button = new()
         {
             Style = (Style)app.Window.FindResource("Plain"),
             Width = 84,
-            Height = 92,
-            Content = C.Stack(badge, C.Space(label, 0, 4), kind),
+            Height = 78,
+            Content = C.Stack(badge, C.Space(label, 0, 4)),
             Cursor = Cursors.Hand
         };
         AutomationProperties.SetName(button, $"{index + 1}. Send to {name}, {(peer != null ? "PC" : "phone")}");
@@ -512,7 +505,7 @@ internal sealed class SendRing
         if (Motion.On)
         {
             ScaleTransform grow = new(0.3, 0.3);
-            button.RenderTransformOrigin = new(0.5, 28 / 92.0);
+            button.RenderTransformOrigin = new(0.5, 28 / 78.0);
             button.RenderTransform = grow;
             button.Opacity = 0;
             TimeSpan begin = TimeSpan.FromSeconds(0.12 + 0.06 * index);
@@ -559,7 +552,7 @@ internal sealed class SendRing
         int focused = buttons.FindIndex(button => button.IsKeyboardFocused);
         int number = e.Key is >= Key.D1 and <= Key.D9 ? e.Key - Key.D1 : e.Key is >= Key.NumPad1 and <= Key.NumPad9 ? e.Key - Key.NumPad1 : -1;
         if (e.Key == Key.Escape)
-            Close();
+            Close(true);
         else if (number >= 0 && number < targets.Count)
             Send(number);
         else if (buttons.Count > 0 && e.Key is Key.Right or Key.Down or Key.Left or Key.Up)
@@ -571,7 +564,7 @@ internal sealed class SendRing
     private async void Send(int index)
     {
         (string name, Peer? peer, BrowserDevice? phone) = targets[index];
-        Close();
+        Close(true);
         string what = paths.Length == 1 ? System.IO.Path.GetFileName(paths[0].TrimEnd('\\')) : paths.Length + " items";
         try
         {
@@ -580,12 +573,14 @@ internal sealed class SendRing
                 if (!app.Engine.Running)
                     app.ToggleReceiving();
                 _ = app.Engine.Send(peer, paths);
-                app.Notice("Sending to " + name, what + ". " + name + " approves before any file is sent; follow it in Transfers.");
+                app.Tell("Sending " + what + " to " + name + ". " + name + " approves before any file is sent.");
+                SendToast.Show(app, "Sending to " + name, what + " · " + name + " is asked to accept", Palette[index % Palette.Length]);
             }
             else if (phone != null)
             {
+                SendToast.Show(app, "Sending to " + name, what, Palette[index % Palette.Length]);
                 await Task.Run(() => app.Engine.Browser.ShareAsync(paths, default, phone.Handle));
-                app.Notice("Sent to " + name, what + " appears on that phone's page under Get files from your PC.");
+                app.Tell("Sent " + what + " to " + name + ". It appears on that phone's page under Get files from your PC.");
             }
         }
         catch (Exception error) { app.Error(error); }
@@ -607,12 +602,84 @@ internal sealed class SendRing
         window.Show();
     }
     private IntPtr Handle => new WindowInteropHelper(window).Handle;
-    private void Close()
+    /// <summary>Closes the ring; with <paramref name="giveBack"/> (a device chosen or Esc) the window it was opened over gets the focus back first.</summary>
+    private void Close(bool giveBack)
     {
         if (closing)
             return;
         closing = true;
+        if (giveBack && returnTo != IntPtr.Zero && Native.IsWindow(returnTo))
+            Native.Foreground(returnTo);
         window.Close();
+    }
+}
+
+/// <summary>A small hopo notice at the bottom right after sending from the ring. It never takes the focus and fades out by itself.</summary>
+internal static class SendToast
+{
+    private static Window? shown;
+    public static void Show(AppShell app, string title, string detail, Color tint)
+    {
+        shown?.Close();
+        TextBlock heading = C.Text(title, 13, bold: true), text = C.Text(detail, 12, "Muted");
+        heading.TextTrimming = text.TextTrimming = TextTrimming.CharacterEllipsis;
+        SolidColorBrush ink = new(tint);
+        ink.Freeze();
+        Ellipse dot = new()
+        {
+            Width = 10,
+            Height = 10,
+            Fill = ink,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new(0, 0, 12, 0)
+        };
+        StackPanel words = C.Stack(C.Space(heading, 2), text);
+        words.Width = 250;
+        Border card = new()
+        {
+            Padding = new(16, 12, 16, 12),
+            CornerRadius = new(14),
+            BorderThickness = new(1),
+            Child = C.Inline(dot, words)
+        };
+        card.SetResourceReference(Border.BackgroundProperty, "Surface");
+        card.SetResourceReference(Border.BorderBrushProperty, "GlassEdge");
+        Grid frame = C.Shadow(card, 14, 30, 10, 0.4);
+        frame.Margin = new(20);
+        Window toast = new()
+        {
+            Title = "hopo",
+            WindowStyle = WindowStyle.None,
+            AllowsTransparency = true,
+            Background = Brushes.Transparent,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Topmost = true,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            Opacity = 0,
+            FontFamily = app.Window.FontFamily,
+            Content = frame
+        };
+        foreach (object key in app.Window.Resources.Keys)
+            toast.Resources[key] = app.Window.Resources[key];
+        toast.SourceInitialized += (_, _) => Native.NoActivate(new WindowInteropHelper(toast).Handle);
+        toast.MouseLeftButtonUp += (_, _) => toast.Close();
+        toast.Closed += (_, _) => { if (shown == toast) shown = null; };
+        toast.ContentRendered += async (_, _) =>
+        {
+            Rect work = SystemParameters.WorkArea;
+            (toast.Left, toast.Top) = (work.Right - toast.ActualWidth, work.Bottom - toast.ActualHeight);
+            toast.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1, TimeSpan.FromSeconds(Motion.On ? 0.2 : 0)));
+            await Task.Delay(3500);
+            if (shown != toast)
+                return;
+            DoubleAnimation fade = new(0, TimeSpan.FromSeconds(Motion.On ? 0.35 : 0));
+            fade.Completed += (_, _) => toast.Close();
+            toast.BeginAnimation(UIElement.OpacityProperty, fade);
+        };
+        shown = toast;
+        toast.Show();
     }
 }
 
@@ -669,6 +736,14 @@ internal static class Native
         if (joined)
             _ = AttachThreadInput(self, front, false);
     }
+    /// <summary>A window that is never activated, even when clicked, and stays out of Alt+Tab.</summary>
+    public static void NoActivate(IntPtr window) => _ = SetWindowLongPtr(window, -20, GetWindowLongPtr(window, -20) | 0x08000080);
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr window);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int capacity);
     [DllImport("user32.dll")]

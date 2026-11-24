@@ -28,7 +28,9 @@ internal sealed class HomePage : IPage
     private sealed record Blink(Border Dot, ScaleTransform Beat, Ellipse Ping, ScaleTransform Spread, double Offset);
     private readonly Shell app;
     private readonly Canvas stage = new() { Width = Size, Height = Size, Background = Brushes.Transparent }, devices = new() { Width = Size, Height = Size };
-    private readonly ContentControl activity = new() { HorizontalAlignment = HorizontalAlignment.Center };
+    // Transfer speed floats at the bottom left with a fixed size, so the dock and rings never move when it appears or changes.
+    private readonly Border activity = new() { Width = 240, Padding = new(14, 10), CornerRadius = new(16), BorderThickness = new(1), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new(24, 0, 0, 12), IsVisible = false, Cursor = new Cursor(StandardCursorType.Hand) };
+    private readonly TextBlock activityTitle = C.Text("", 13, bold: true), activityDetail = C.Text("", 12, "Muted");
     private readonly Path[] lines = new Path[Waves.Length], glows = new Path[Waves.Length], halos = new Path[Waves.Length];
     private readonly Point[] samples = new Point[180];
     private readonly (Border Ripple, ScaleTransform Scale)[] ripples = new (Border, ScaleTransform)[2];
@@ -139,8 +141,13 @@ internal sealed class HomePage : IPage
             BoxShadow = Theme.Shadow(24, 60, 0.45),
             HorizontalAlignment = HorizontalAlignment.Center
         };
-        StackPanel foot = C.Stack(activity, bar);
-        foot.Spacing = 12;
+        StackPanel foot = C.Stack(bar);
+        activityTitle.TextTrimming = activityDetail.TextTrimming = TextTrimming.CharacterEllipsis;
+        activity.Child = C.Stack(activityTitle, activityDetail);
+        activity.Background = Theme.Brush(Theme.Dark ? "#0C0C14/80" : "Glass");
+        activity.BorderBrush = Theme.Brush("GlassBorder");
+        activity.BoxShadow = Theme.Shadow(14, 40, 0.4);
+        activity.PointerPressed += (_, _) => app.Navigate("Transfers");
         foot.Margin = new(16, 0, 16, 24);
         foot.HorizontalAlignment = HorizontalAlignment.Center;
         Grid layout = new()
@@ -154,6 +161,7 @@ internal sealed class HomePage : IPage
         // The shell's faint rings continue the field to the window edges behind the stage; the stage itself may overflow its box when the rings swell.
         layout.Children.Add(new Viewbox { Child = stage, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Margin = new(16, 8, 16, 12), ClipToBounds = false });
         layout.Children.Add(clickAway);
+        layout.Children.Add(activity);
         layout.Children.Add(sheetHost);
         layout.Children.Add(foot);
         // Clicking empty space unpins a device card.
@@ -251,8 +259,16 @@ internal sealed class HomePage : IPage
     }
     public void Refresh()
     {
-        double speed = app.Engine.Transfers.Records.Where(r => !r.Terminal).Sum(r => r.BytesPerSecond);
-        activity.Content = speed > 0 ? C.Small($"{speed / 1048576:0.0} MB/s transferring · View", () => app.Navigate("Transfers")) : null;
+        // Shown for the whole time files move (not only while the speed reads above zero), so it does not blink.
+        TransferRecord[] moving = [.. app.Engine.Transfers.Records.Where(r => r.State is TransferState.Sending or TransferState.Receiving or TransferState.Verifying)];
+        double speed = moving.Sum(r => r.BytesPerSecond);
+        activity.IsVisible = moving.Length > 0;
+        if (moving.Length > 0)
+        {
+            TransferRecord first = moving[0];
+            activityTitle.Text = moving.Length > 1 ? moving.Length + " transfers" : (first.Direction == "Received" ? "Receiving from " : "Sending to ") + first.PeerName;
+            activityDetail.Text = (speed > 0 ? $"{speed / 1048576:0.0} MB/s" : "Starting") + (moving.Length == 1 && first.TimeLeft.Length > 0 ? " · " + first.TimeLeft : "");
+        }
         fillSheet?.Invoke();
         List<Spot> spots = [.. app.Engine.Peers.Where(p => !p.Blocked && (p.Paired || p.Online)).OrderByDescending(p => p.Paired).ThenByDescending(p => p.Online).ThenBy(p => p.Name).Take(8).Select(p => new Spot(p.Fingerprint, p.Name, Pc(p), p, null)),
             .. app.Engine.Browser.Browsers.Take(6).Select(b => new Spot("browser:" + b.Handle, b.Label, "Phone", null, b))];
