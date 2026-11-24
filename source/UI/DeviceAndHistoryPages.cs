@@ -178,6 +178,7 @@ internal sealed class HistoryPage : IPage
 {
     private readonly AppShell app;
     private readonly StackPanel list = new();
+    private string shown = "";
     public FrameworkElement View
     {
         get;
@@ -191,15 +192,27 @@ internal sealed class HistoryPage : IPage
     }
     public void Refresh()
     {
+        TransferRecord[] records = app.Engine.Transfers.Records.Where(r => r.Terminal && (r.Title.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.PeerName.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.Files.Any(f => f.RelativePath.Contains(app.Search, StringComparison.OrdinalIgnoreCase)))).Take(50).ToArray();
+        // Transfers report progress several times a second; History only redraws when its list of finished transfers changes.
+        string key = string.Join('|', records.Select(r => r.Id + r.Direction + r.State));
+        if (key == shown && list.Children.Count > 0)
+            return;
+        shown = key;
         list.Children.Clear();
-        TransferRecord[] records = app.Engine.Transfers.Records.Where(r => r.Terminal && (r.Title.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.PeerName.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.Files.Any(f => f.RelativePath.Contains(app.Search, StringComparison.OrdinalIgnoreCase)))).Take(100).ToArray();
         if (records.Length == 0)
             list.Children.Add(C.Empty("No matching history.", "Completed, declined, cancelled, and failed transfers appear here. Clearing history keeps received files.", "history"));
         foreach (TransferRecord record in records)
         {
             StackPanel container = C.Stack(Summary(record));
-            if (record.Direction == "Received" && Directory.Exists(record.Destination))
-                container.Children.Add(C.Space(C.Small("Reveal receive folder", () => app.Reveal(record.Destination)), 0, 8));
+            List<Button> actions = [];
+            if (record.Direction == "Received" && record.Destination.Length > 0)
+                actions.Add(C.Small("Reveal receive folder", () => app.Reveal(record.Destination)));
+            if (app.Admin)
+                actions.Add(C.Small("Delete", () => TransferRow.Delete(app, record)));
+            for (int i = 1; i < actions.Count; i++)
+                actions[i].Margin = new(8, 0, 0, 0);
+            if (actions.Count > 0)
+                container.Children.Add(C.Space(C.Inline([.. actions]), 0, 8));
             list.Children.Add(C.Space(container, 14));
         }
     }
@@ -214,6 +227,7 @@ internal sealed class HistoryPage : IPage
         if (MessageBox.Show(app.Window, "Clear finished transfer metadata? Received files will stay on disk. Active transfers will remain listed.", "Clear history", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
             return;
         app.Engine.Transfers.ClearFinished();
+        shown = "";
         Refresh();
         app.Tell("Finished history cleared. Received files were kept.");
     }

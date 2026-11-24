@@ -67,6 +67,7 @@ internal sealed class AppShell : IDisposable
     private bool selecting, disposed, closing, allowClose;
     private bool sharingStoppedManually;
     private string networkSignature = "";
+    private bool checkingNetwork;
     private readonly DispatcherTimer networkTimer = new() { Interval = TimeSpan.FromSeconds(10) };
     // Transfers, discovery and phones report many times a second; the page catches up at most four times a second.
     private readonly DispatcherTimer later = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -91,7 +92,11 @@ internal sealed class AppShell : IDisposable
             }
         };
         Window.Loaded += (_, _) => { Motion.Drift(Find<System.Windows.Shapes.Ellipse>("GlowTop"), -0.14, 0.1, 0.95, 60); Motion.Drift(Find<System.Windows.Shapes.Ellipse>("GlowBottom"), 0.18, 0.12, 1.1, 68); };
-        Engine = new(store, identity, allowLoopback: preview);
+        Engine = new(store, identity, allowLoopback: preview)
+        {
+            // The window never waits for the phone page's web server to start.
+            BrowserInBackground = !preview
+        };
         Dialogs = new(this);
         Firewall = new(this);
         explorerSharing = new(this);
@@ -193,7 +198,7 @@ internal sealed class AppShell : IDisposable
         Window.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape && Find<Grid>("MenuLayer").Visibility == Visibility.Visible) { ShowMenu(false); e.Handled = true; } };
         Find<TextBox>("SearchBox").TextChanged += (_, _) => page?.Refresh();
         Find<Button>("ReceiveToggle").Click += (_, _) => { try { ToggleReceiving(); } catch (Exception e) { Error(e); } };
-        Find<Button>("OpenBrowser").Click += (_, _) => { try { OpenBrowser(); } catch (Exception error) { Error(error); } };
+        Find<Button>("OpenBrowser").Click += (_, _) => OpenBrowser();
         Window.Closing += OnClosing;
         if (!preview)
         {
@@ -458,20 +463,25 @@ internal sealed class AppShell : IDisposable
         notifications.BalloonTipText = text;
         notifications.ShowBalloonTip(4000);
     }
-    public void OpenBrowser(string relative = "/")
+    public async void OpenBrowser(string relative = "/")
     {
-        if (!Store.Preferences.BrowserSharingEnabled)
-            Store.SetPreferences(Store.Preferences with
-            {
-                BrowserSharingEnabled = true
-            });
-        if (!Engine.Running && !Engine.Browser.Running)
-            ToggleReceiving();
-        else
-            Engine.ApplySavedPreferences();
-        if (!Engine.Browser.Running)
-            throw new IOException("Browser sharing could not start. Check the selected network in Settings.");
-        Process.Start(new ProcessStartInfo(new Uri(new Uri(Engine.Browser.Url), relative).AbsoluteUri) { UseShellExecute = true });
+        try
+        {
+            if (!Store.Preferences.BrowserSharingEnabled)
+                Store.SetPreferences(Store.Preferences with
+                {
+                    BrowserSharingEnabled = true
+                });
+            if (!Engine.Running && !Engine.Browser.Running)
+                ToggleReceiving();
+            else
+                Engine.ApplySavedPreferences();
+            await Engine.BrowserStarting;
+            if (!Engine.Browser.Running)
+                throw new IOException("Browser sharing could not start. Check the selected network in Settings.");
+            Process.Start(new ProcessStartInfo(new Uri(new Uri(Engine.Browser.Url), relative).AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception error) { Error(error); }
     }
     public void ToggleReceiving()
     {
@@ -504,13 +514,17 @@ internal sealed class AppShell : IDisposable
         if (!preview)
             _ = Firewall.EnsureAsync();
     }
-    private void RecoverNetwork()
+    private async void RecoverNetwork()
     {
-        if (disposed || closing || sharingStoppedManually || !Store.Preferences.StartReceivingOnOpen)
+        if (disposed || closing || checkingNetwork || sharingStoppedManually || !Store.Preferences.StartReceivingOnOpen)
             return;
+        checkingNetwork = true;
         try
         {
-            NetworkAdapter[] available = NetworkAdapter.Available();
+            // Listing network adapters can take a second on PCs with VPN or virtual adapters, so it never runs on the window.
+            NetworkAdapter[] available = await Task.Run(NetworkAdapter.Available);
+            if (disposed || closing || sharingStoppedManually)
+                return;
             string signature = string.Join(";", available.Select(adapter => adapter.Address + "/" + adapter.Mask).Order());
             if (Engine.Running && signature != networkSignature)
             {
@@ -526,7 +540,8 @@ internal sealed class AppShell : IDisposable
                 Tell("Network reconnected. Discovery and linked-folder sync resumed automatically.");
             }
         }
-        catch (Exception error) when (error is IOException or System.Net.Sockets.SocketException or InvalidOperationException) { Tell("Waiting for home-network access. " + TransferEngine.HumanError(error)); }
+        catch (Exception error) when (error is IOException or System.Net.Sockets.SocketException or InvalidOperationException or System.Net.NetworkInformation.NetworkInformationException) { Tell("Waiting for home-network access. " + TransferEngine.HumanError(error)); }
+        finally { checkingNetwork = false; }
     }
     /// <summary>Raised as soon as a PC or browser asks to send, before the approval window, so a hidden or minimized app is noticed.</summary>
     private void NotifyWaiting(BrowserDevice device)

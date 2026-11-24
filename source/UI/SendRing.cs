@@ -134,6 +134,26 @@ internal sealed class ShortcutWatcher : IDisposable
 internal static class ExplorerSelection
 {
     private static readonly Guid TopLevelBrowser = new("4C96BE40-915C-11CF-99D3-00AA004AE837"), ShellBrowser = new("000214E2-0000-0000-C000-000000000046");
+    /// <summary>Reads the selection on its own single-threaded COM thread, so the window never waits for Explorer.</summary>
+    public static Task<string[]> ReadAsync(IntPtr window)
+    {
+        TaskCompletionSource<string[]> done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Thread reader = new(() =>
+        {
+            try
+            {
+                done.TrySetResult(Read(window));
+            }
+            catch (Exception error) { done.TrySetException(error); }
+        })
+        {
+            IsBackground = true,
+            Name = "hopo Explorer selection"
+        };
+        reader.SetApartmentState(ApartmentState.STA);
+        reader.Start();
+        return done.Task;
+    }
     public static string[] Read(IntPtr window)
     {
         if (Type.GetTypeFromProgID("Shell.Application") is not Type type)
@@ -216,7 +236,12 @@ internal static class ExplorerSelection
 internal sealed class SendRing
 {
     private const double Size = 420, Middle = Size / 2, Orbit = 140;
+    // The Home ring colours: each device gets its own, and the orbit turns through all of them.
+    private static readonly Color[] Palette = [.. new[] { "#B57CFF", "#3FE0FF", "#3DF5A0", "#FF6AD5", "#F5B54A", "#6FB7FF", "#FF8A80", "#5CF0D0" }.Select(hex => (Color)ColorConverter.ConvertFromString(hex))];
     private static Window? open;
+    private static bool opening;
+    // Endless motion in the ring, stopped when it closes.
+    private readonly List<Action> loops = [];
     private readonly AppShell app;
     private readonly string[] paths;
     private readonly List<(string Name, Peer? Peer, BrowserDevice? Phone)> targets = [];
@@ -251,16 +276,30 @@ internal sealed class SendRing
         window.Content = Build();
         window.KeyDown += Pressed;
         window.Deactivated += (_, _) => Close();
-        window.Closed += (_, _) => { if (open == window) open = null; };
+        window.Closed += (_, _) =>
+        {
+            foreach (Action stop in loops)
+                stop();
+            if (open == window)
+                open = null;
+        };
     }
     /// <summary>The ring's content for the preview screenshot checks, without showing it or reading Explorer.</summary>
     public static FrameworkElement Preview(AppShell app, string[] paths) => (FrameworkElement)new SendRing(app, paths).window.Content;
     /// <summary>Opens the ring for the selection in <paramref name="explorer"/> (an Explorer window or the desktop). Nothing selected: nothing opens.</summary>
-    public static void Open(AppShell app, IntPtr explorer)
+    public static async void Open(AppShell app, IntPtr explorer)
     {
-        if (open != null)
+        if (open != null || opening)
             return;
-        string[] paths = ExplorerSelection.Read(explorer);
+        opening = true;
+        string[] paths;
+        try
+        {
+            // Explorer is asked on its own thread with a time limit, so a busy Explorer never freezes hopo.
+            paths = await ExplorerSelection.ReadAsync(explorer).WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        catch (TimeoutException) { paths = []; }
+        finally { opening = false; }
         if (paths.Length == 0)
         {
             app.Tell("Select files or folders in File Explorer, then press " + app.Store.Preferences.SendShortcut + ".");
@@ -286,16 +325,79 @@ internal sealed class SendRing
         plate.SetResourceReference(Shape.FillProperty, "Menu");
         plate.SetResourceReference(Shape.StrokeProperty, "GlassEdge");
         Place(stage, plate, 4, 4);
-        Ellipse orbit = new()
+        // A soft violet haze in the middle and a ripple that grows out of it every few seconds.
+        Ellipse haze = Glow(Palette[0], 250, 0.35);
+        Place(stage, haze, Middle - 125, Middle - 125);
+        ScaleTransform spread = new(0.45, 0.45);
+        Ellipse ripple = new()
+        {
+            Width = 220,
+            Height = 220,
+            StrokeThickness = 1.5,
+            Stroke = new SolidColorBrush(Palette[1]),
+            Opacity = 0,
+            IsHitTestVisible = false,
+            RenderTransformOrigin = new(0.5, 0.5),
+            RenderTransform = spread
+        };
+        Place(stage, ripple, Middle - 110, Middle - 110);
+        // The orbit turns slowly through the Home ring colours; a dotted ring outside it turns the other way.
+        LinearGradientBrush rainbow = new()
+        {
+            StartPoint = new(0, 0),
+            EndPoint = new(1, 1)
+        };
+        for (int i = 0; i <= Palette.Length; i++)
+            rainbow.GradientStops.Add(new(Palette[i % Palette.Length], (double)i / Palette.Length));
+        rainbow.Freeze();
+        Grid orbit = new()
         {
             Width = Orbit * 2,
             Height = Orbit * 2,
-            StrokeThickness = 1,
-            Opacity = 0.8,
-            IsHitTestVisible = false
+            IsHitTestVisible = false,
+            RenderTransformOrigin = new(0.5, 0.5),
+            RenderTransform = new RotateTransform()
         };
-        orbit.SetResourceReference(Shape.StrokeProperty, "GlassBorder");
+        orbit.Children.Add(new Ellipse { Stroke = rainbow, StrokeThickness = 10, Opacity = 0.2 });
+        orbit.Children.Add(new Ellipse { Stroke = rainbow, StrokeThickness = 2.5, Opacity = 0.95 });
         Place(stage, orbit, Middle - Orbit, Middle - Orbit);
+        Ellipse dots = new()
+        {
+            Width = Orbit * 2 + 64,
+            Height = Orbit * 2 + 64,
+            Stroke = rainbow,
+            StrokeThickness = 1.5,
+            StrokeDashArray = [1, 7],
+            StrokeDashCap = PenLineCap.Round,
+            Opacity = 0.5,
+            IsHitTestVisible = false,
+            RenderTransformOrigin = new(0.5, 0.5),
+            RenderTransform = new RotateTransform()
+        };
+        Place(stage, dots, Middle - Orbit - 32, Middle - Orbit - 32);
+        if (Motion.On)
+        {
+            loops.Add(Motion.Loop((RotateTransform)orbit.RenderTransform, RotateTransform.AngleProperty, new DoubleAnimation(0, 360, TimeSpan.FromSeconds(16)) { RepeatBehavior = RepeatBehavior.Forever }));
+            loops.Add(Motion.Loop((RotateTransform)dots.RenderTransform, RotateTransform.AngleProperty, new DoubleAnimation(360, 0, TimeSpan.FromSeconds(40)) { RepeatBehavior = RepeatBehavior.Forever }));
+            DoubleAnimation grow = new(0.45, 1.25, TimeSpan.FromSeconds(2.8))
+            {
+                EasingFunction = Bezier.Ripple,
+                RepeatBehavior = RepeatBehavior.Forever
+            };
+            loops.Add(Motion.Loop(spread, ScaleTransform.ScaleXProperty, grow));
+            loops.Add(Motion.Loop(spread, ScaleTransform.ScaleYProperty, grow.Clone()));
+            loops.Add(Motion.Loop(ripple, UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(2.8), RepeatBehavior = RepeatBehavior.Forever, KeyFrames = { new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)), new LinearDoubleKeyFrame(0.5, KeyTime.FromPercent(0.15)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } }));
+            // The ring pops open from the pointer.
+            ScaleTransform pop = new(0.86, 0.86);
+            stage.RenderTransformOrigin = new(0.5, 0.5);
+            stage.RenderTransform = pop;
+            DoubleAnimation popIn = new(0.86, 1, TimeSpan.FromSeconds(0.38))
+            {
+                EasingFunction = Bezier.Pop
+            };
+            pop.BeginAnimation(ScaleTransform.ScaleXProperty, popIn);
+            pop.BeginAnimation(ScaleTransform.ScaleYProperty, popIn);
+        }
         int files = paths.Count(File.Exists), folders = paths.Length - files;
         long bytes = paths.Where(File.Exists).Sum(path => new FileInfo(path).Length);
         string what = string.Join(", ", new[] { files > 0 ? files + (files == 1 ? " file" : " files") : "", folders > 0 ? folders + (folders == 1 ? " folder" : " folders") : "" }.Where(part => part.Length > 0));
@@ -325,20 +427,51 @@ internal sealed class SendRing
         Canvas.SetTop(element, top);
         canvas.Children.Add(element);
     }
+    /// <summary>A soft round glow: a gradient, which costs nothing to redraw, unlike a blur.</summary>
+    private static Ellipse Glow(Color color, double size, double strength)
+    {
+        RadialGradientBrush fill = new()
+        {
+            GradientStops = { new(Color.FromArgb((byte)(strength * 255), color.R, color.G, color.B), 0), new(Color.FromArgb((byte)(strength * 90), color.R, color.G, color.B), 0.55), new(Color.FromArgb(0, color.R, color.G, color.B), 1) }
+        };
+        fill.Freeze();
+        return new Ellipse { Width = size, Height = size, Fill = fill, IsHitTestVisible = false };
+    }
+    private static SolidColorBrush Solid(Color color)
+    {
+        SolidColorBrush brush = new(color);
+        brush.Freeze();
+        return brush;
+    }
     private Button Device(int index)
     {
         (string name, Peer? peer, _) = targets[index];
-        Ellipse disc = new()
+        Color tint = Palette[index % Palette.Length];
+        // Each device has its own colour: a tinted disc, a coloured letter and edge, and a glow behind it.
+        RadialGradientBrush inside = new()
+        {
+            GradientStops = { new(Color.FromArgb(110, tint.R, tint.G, tint.B), 0), new(Color.FromArgb(40, tint.R, tint.G, tint.B), 1) }
+        };
+        inside.Freeze();
+        Ellipse halo = Glow(tint, 84, 0.55), disc = new()
         {
             Width = 52,
             Height = 52,
-            StrokeThickness = 1
+            StrokeThickness = 2,
+            Fill = inside,
+            Stroke = Solid(tint)
         };
-        disc.SetResourceReference(Shape.FillProperty, "Glass");
-        disc.SetResourceReference(Shape.StrokeProperty, "GlassBorder");
-        TextBlock letter = C.Text(name.Length > 0 ? char.ToUpperInvariant(name[0]).ToString() : "?", 20, peer != null ? "Mint" : "Phone", true);
+        halo.Opacity = 0.35;
+        halo.Margin = new(-14);
+        halo.RenderTransformOrigin = new(0.5, 0.5);
+        halo.RenderTransform = new ScaleTransform();
+        TextBlock letter = C.Text(name.Length > 0 ? char.ToUpperInvariant(name[0]).ToString() : "?", 20, bold: true);
+        letter.Foreground = Solid(tint);
         letter.HorizontalAlignment = HorizontalAlignment.Center;
         letter.VerticalAlignment = VerticalAlignment.Center;
+        TextBlock digit = C.Text((index + 1).ToString(), 10, bold: true);
+        digit.Foreground = Solid(Color.FromRgb(20, 22, 29));
+        digit.HorizontalAlignment = HorizontalAlignment.Center;
         Border number = new()
         {
             Width = 18,
@@ -346,16 +479,19 @@ internal sealed class SendRing
             CornerRadius = new(9),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Child = C.Text((index + 1).ToString(), 10, "OnAccent", true)
+            Background = Solid(tint),
+            Child = digit
         };
-        ((TextBlock)number.Child).HorizontalAlignment = HorizontalAlignment.Center;
-        number.SetResourceReference(Border.BackgroundProperty, "Accent");
+        ScaleTransform lift = new();
         Grid badge = new()
         {
             Width = 56,
             Height = 56,
-            HorizontalAlignment = HorizontalAlignment.Center
+            HorizontalAlignment = HorizontalAlignment.Center,
+            RenderTransformOrigin = new(0.5, 0.5),
+            RenderTransform = lift
         };
+        badge.Children.Add(halo);
         badge.Children.Add(disc);
         badge.Children.Add(letter);
         badge.Children.Add(number);
@@ -372,10 +508,44 @@ internal sealed class SendRing
             Cursor = Cursors.Hand
         };
         AutomationProperties.SetName(button, $"{index + 1}. Send to {name}, {(peer != null ? "PC" : "phone")}");
+        // Devices appear one after another in their places: they grow in, they never move around.
+        if (Motion.On)
+        {
+            ScaleTransform grow = new(0.3, 0.3);
+            button.RenderTransformOrigin = new(0.5, 28 / 92.0);
+            button.RenderTransform = grow;
+            button.Opacity = 0;
+            TimeSpan begin = TimeSpan.FromSeconds(0.12 + 0.06 * index);
+            DoubleAnimation appear = new(0.3, 1, TimeSpan.FromSeconds(0.5))
+            {
+                EasingFunction = Bezier.Spring,
+                BeginTime = begin
+            };
+            grow.BeginAnimation(ScaleTransform.ScaleXProperty, appear);
+            grow.BeginAnimation(ScaleTransform.ScaleYProperty, appear);
+            button.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.25)) { BeginTime = begin });
+        }
+        // The device under the pointer or keyboard grows a little and its glow breathes.
+        Action? breathing = null;
         void Mark(bool on)
         {
-            disc.StrokeThickness = on ? 2 : 1;
-            disc.SetResourceReference(Shape.StrokeProperty, on ? "Accent" : "GlassBorder");
+            Motion.To(lift, ScaleTransform.ScaleXProperty, on ? 1.12 : 1, Motion.On ? 0.3 : 0, Bezier.Spring);
+            Motion.To(lift, ScaleTransform.ScaleYProperty, on ? 1.12 : 1, Motion.On ? 0.3 : 0, Bezier.Spring);
+            halo.Opacity = on ? 0.9 : 0.35;
+            breathing?.Invoke();
+            breathing = null;
+            if (!on || !Motion.On)
+                return;
+            ScaleTransform pulse = (ScaleTransform)halo.RenderTransform;
+            DoubleAnimation beat = new(1, 1.22, TimeSpan.FromSeconds(0.8))
+            {
+                AutoReverse = true,
+                RepeatBehavior = RepeatBehavior.Forever,
+                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+            };
+            Action x = Motion.Loop(pulse, ScaleTransform.ScaleXProperty, beat), y = Motion.Loop(pulse, ScaleTransform.ScaleYProperty, beat.Clone());
+            breathing = () => { x(); y(); };
+            loops.Add(breathing);
         }
         button.GotKeyboardFocus += (_, _) => Mark(true);
         button.LostKeyboardFocus += (_, _) => Mark(false);

@@ -91,6 +91,7 @@ internal static partial class Program
         await Version201CasesAsync();
         await Version254CasesAsync();
         SendRingCases();
+        await TransferDeleteCasesAsync();
         await NoteCasesAsync();
         await EfficientSyncCasesAsync();
         await FirewallCasesAsync();

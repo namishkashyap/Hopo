@@ -273,6 +273,18 @@ public sealed class TransferRegistry
         foreach (TransferJob job in all.Where(j => !j.Snapshot.Terminal))
             job.Cancel();
     }
+    /// <summary>Removes one finished transfer from the list and saved history. Received files stay on disk; an active transfer is never removed.</summary>
+    public bool Remove(string id, string direction)
+    {
+        lock (gate)
+        {
+            if (!history.TryGetValue(id + direction, out TransferRecord? record) || !record.Terminal)
+                return false;
+            history.Remove(id + direction);
+            Save();
+            return true;
+        }
+    }
     public void ClearFinished()
     {
         lock (gate)

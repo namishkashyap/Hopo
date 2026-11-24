@@ -3,6 +3,27 @@ using Lantoss.Core;
 
 internal static partial class Program
 {
+    // hopo Admin deletes one finished transfer (docs/changes/2026-11-24-hopo-2.6.4-smooth-delete-ring.md).
+    private static async Task TransferDeleteCasesAsync()
+    {
+        MetadataStore store = Store("Delete one transfer");
+        TransferRecord Finished(string peer) => new()
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Direction = "Received",
+            PeerName = peer,
+            PeerFingerprint = new string('A', 64),
+            State = TransferState.Completed,
+            CreatedUtc = DateTime.UtcNow
+        };
+        TransferRecord gone = Finished("Old PC"), kept = Finished("Family PC");
+        store.SetHistory([gone, kept]);
+        TransferRegistry transfers = new(store);
+        bool removed = transfers.Remove(gone.Id, gone.Direction), again = transfers.Remove(gone.Id, gone.Direction), wrongDirection = transfers.Remove(kept.Id, "Sent");
+        await transfers.FlushAsync();
+        TransferRecord[] saved = [.. new MetadataStore(store.Root).History];
+        Check(removed && !again && !wrongDirection && transfers.Records.Length == 1 && saved.Length == 1 && saved[0].Id == kept.Id, "Deleting one finished transfer removes only that record, also from the saved history");
+    }
     // The Explorer send ring (docs/changes/2026-11-24-hopo-send-ring.md): the key rule and the shortcut preference.
     private static void SendRingCases()
     {
