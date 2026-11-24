@@ -169,7 +169,16 @@ public static class FileCatalog
             current = Path.GetDirectoryName(current);
         }
     }
-    public static long FreeSpace(string folder) => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(folder))!).AvailableFreeSpace;
+    public static long FreeSpace(string folder)
+    {
+        string full = Path.GetFullPath(folder);
+        if (OperatingSystem.IsWindows())
+            return new DriveInfo(Path.GetPathRoot(full)!).AvailableFreeSpace;
+        // Elsewhere "/" is often a small system partition (always on Android): measure the partition that holds the folder itself.
+        while (!Directory.Exists(full) && Path.GetDirectoryName(full) is string parent)
+            full = parent;
+        return new DriveInfo(full).AvailableFreeSpace;
+    }
     public static string Within(string root, string relative)
     {
         ValidateRelative(relative);

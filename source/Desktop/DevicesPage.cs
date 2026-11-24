@@ -47,6 +47,8 @@ internal sealed class DevicesPage : IPage
                 if (!OperatingSystem.IsAndroid())
                     actions.Children.Add(C.Small("Shared folders", () => app.Navigate("Shared Spaces")));
                 actions.Children.Add(C.Small(peer.Favorite ? "Unfavorite" : "Favorite", () => app.Engine.EditPeer(peer with { Favorite = !peer.Favorite })));
+                // A trusted PC's files arrive without asking.
+                actions.Children.Add(C.Small(peer.Trusted ? "Ask every time" : "Always accept files", () => { app.Engine.EditPeer(peer with { Trusted = !peer.Trusted }); app.Tell(peer.Trusted ? "Files from " + peer.Name + " will ask again." : "Files from " + peer.Name + " now arrive without asking."); }));
                 actions.Children.Add(C.Small("Rename", async () =>
                 {
                     string? name = await app.Dialogs.PromptAsync("Local device name", "Shown on this computer only", peer.Name);

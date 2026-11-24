@@ -78,7 +78,9 @@ internal sealed class TransferRow
     private TransferRecord record;
     private readonly TextBlock title = C.Text("", 15, bold: true), status = C.Text("", 12, "Primary", true), detail = C.Text("", 11, "Muted"), current = C.Text("", 12), amount = C.Text("", 11, "Muted"), speed = C.Text("", 11, "Primary"), error = C.Text("", 12, "Danger");
     private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100, Height = 6, MinHeight = 6, CornerRadius = new(3), Background = Theme.Brush("Text/8"), Margin = new(0, 12) };
-    private readonly StackPanel buttons = C.Inline(), fileDetails = new() { IsVisible = false };
+    // A phone wraps the transfer buttons onto more lines.
+    private readonly Panel buttons = OperatingSystem.IsAndroid() ? new WrapPanel() : C.Inline();
+    private readonly StackPanel fileDetails = new() { IsVisible = false };
     private readonly Button details;
     private bool lastTerminal;
     public Border View
@@ -135,6 +137,20 @@ internal sealed class TransferRow
             buttons.Children.Add(C.Small("Retry", () => { app.Engine.Retry(record); app.Tell("Retry queued. The recipient will be asked again."); }));
         if (record.Direction == "Received" && Directory.Exists(record.Destination))
             buttons.Children.Add(C.Small("Reveal receive folder", () => app.Reveal(record.Destination)));
+        if (record.Terminal)
+            buttons.Children.Add(C.Small("Delete", () => _ = DeleteAsync(app, record)));
+        if (buttons is WrapPanel)
+            foreach (Control button in buttons.Children)
+                button.Margin = new(0, 0, 8, 8);
+    }
+    /// <summary>Removes one finished transfer from the list and history after a confirmation; received files stay.</summary>
+    public static async Task DeleteAsync(Shell app, TransferRecord record)
+    {
+        if (!await app.Dialogs.ConfirmAsync("Delete transfer", "Delete this transfer from the list and history?\n\n" + record.Title + " · " + record.PeerName + "\n\nReceived files stay on this " + Shell.Platform + ".", "Delete"))
+            return;
+        if (app.Engine.Transfers.Remove(record.Id, record.Direction))
+            app.Tell("Transfer deleted from the list. Received files were kept.");
+        app.RefreshPage();
     }
     private void UpdateFiles()
     {
@@ -174,7 +190,7 @@ internal sealed class HistoryPage : IPage
             TextBlock device = C.Text(record.PeerName + (record.PeerAddress.Length > 0 ? " · " + record.PeerAddress : ""), 12, "Muted");
             device.TextTrimming = TextTrimming.CharacterEllipsis;
             device.TextWrapping = TextWrapping.NoWrap;
-            Grid row = Row(C.Medium(record.Title, 13), device, C.Text(record.Direction, 12, "Muted"), C.Text(record.SizeText, 12, "Muted"), C.Badge(record.StatusText, color, color + "/14"), C.Text(record.CreatedUtc.ToLocalTime().ToString("dd MMM, HH:mm"), 12, "Muted"), reveal);
+            Grid row = Row(C.Medium(record.Title, 13), device, C.Text(record.Direction, 12, "Muted"), C.Text(record.SizeText, 12, "Muted"), C.Badge(record.StatusText, color, color + "/14"), C.Text(record.CreatedUtc.ToLocalTime().ToString("dd MMM, HH:mm"), 12, "Muted"), C.Inline(reveal, C.IconButton("close", () => _ = TransferRow.DeleteAsync(app, record), "Delete from history", true)));
             list.Children.Add(new Border { BorderBrush = Theme.Brush("Text/6"), BorderThickness = new(0, 1, 0, 0), Child = row });
         }
     }
@@ -182,7 +198,7 @@ internal sealed class HistoryPage : IPage
     {
         Grid row = new()
         {
-            ColumnDefinitions = new ColumnDefinitions("2*,1.5*,90,80,120,110,44"),
+            ColumnDefinitions = new ColumnDefinitions("2*,1.5*,90,80,120,110,92"),
             MinHeight = 46
         };
         for (int index = 0; index < cells.Length; index++)

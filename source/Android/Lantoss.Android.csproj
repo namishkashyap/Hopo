@@ -7,8 +7,8 @@
     <RootNamespace>Lantoss.Android</RootNamespace><AssemblyName>hopo</AssemblyName>
     <ApplicationId>io.github.namishkashyap.hopo</ApplicationId>
     <ApplicationTitle>hopo</ApplicationTitle>
-    <ApplicationDisplayVersion>2.6.5</ApplicationDisplayVersion><ApplicationVersion>3</ApplicationVersion>
-    <Version>2.6.5</Version><Product>hopo</Product>
+    <ApplicationDisplayVersion>2.6.6</ApplicationDisplayVersion><ApplicationVersion>4</ApplicationVersion>
+    <Version>2.6.6</Version><Product>hopo</Product>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <RuntimeIdentifiers>android-arm64;android-arm;android-x64</RuntimeIdentifiers>
     <!-- The shared code serialises with reflection-based System.Text.Json; trimming would strip what it needs. -->

@@ -45,6 +45,11 @@ public sealed partial class TransferEngine : IDisposable
     {
         get; set;
     }
+    /// <summary>Where a trusted PC's files go without asking; the Android app gives each transfer its own folder before moving it to Downloads.</summary>
+    public Func<string, Manifest, string>? TrustedFolder
+    {
+        get; set;
+    }
     public Func<ReceiveRequest, CancellationToken, Task<ReceiveDecision>>? ApproveReceive
     {
         get; set;
@@ -539,7 +544,7 @@ public sealed partial class TransferEngine : IDisposable
             approvalTimeout.CancelAfter(TimeSpan.FromMinutes(2));
             string inbox = preferences.SenderFolders ? Profiles.SenderFolder(preferences.ReceiveFolder, peer.Name) : preferences.ReceiveFolder;
             // A trusted PC skips the prompt and lands in the usual inbox.
-            ReceiveDecision decision = peer.Trusted ? new(true, inbox) : await ApproveReceive(new(peer.Name, fingerprint, manifest, inbox, FileCatalog.FreeSpace(inbox), peer.KeyVerified, Address: peer.Address), approvalTimeout.Token);
+            ReceiveDecision decision = peer.Trusted ? new(true, TrustedFolder?.Invoke(inbox, manifest) ?? inbox) : await ApproveReceive(new(peer.Name, fingerprint, manifest, inbox, FileCatalog.FreeSpace(inbox), peer.KeyVerified, Address: peer.Address), approvalTimeout.Token);
             if (!decision.Accepted)
             {
                 job.State(TransferState.Declined, "Declined by the recipient.");

@@ -75,6 +75,11 @@ internal sealed class Shell : IDisposable
     {
         get; set;
     }
+    /// <summary>Shows an incoming transfer as a notification with Decline (0), Accept (1) and Always accept (2); returns what removes it. Set by the Android app.</summary>
+    public static Func<ReceiveRequest, Action<int>, Action>? IncomingHook
+    {
+        get; set;
+    }
     /// <summary>Copies a picked Android document (a content URI) into the app's cache so it can be sent; set by the Android app.</summary>
     public static Func<IStorageFile, Task<string?>>? ImportHook
     {
@@ -120,7 +125,8 @@ internal sealed class Shell : IDisposable
     }
     public string Search => search.Text?.Trim() ?? "";
     public static string Platform => OperatingSystem.IsAndroid() ? "phone" : OperatingSystem.IsMacOS() ? "Mac" : OperatingSystem.IsLinux() ? "Linux PC" : "PC";
-    private readonly DispatcherTimer networkTimer = new() { Interval = TimeSpan.FromSeconds(10) };
+    private readonly DispatcherTimer networkTimer = new() { Interval = TimeSpan.FromSeconds(10) }, later = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private void Later() => later.IsEnabled = true;
     private TextBox search = new();
     private TextBlock feedback = new(), networkStatus = new(), pageTitle = new(), slash = new(), storageText = new();
     private ProgressBar storageBar = new();
@@ -160,14 +166,16 @@ internal sealed class Shell : IDisposable
         Engine.ApprovePair = Dialogs.CompareAsync;
         Engine.ApproveReceive = (request, token) => { Ui(() => NotifyIncoming(request)); return Dialogs.ReceiveAsync(request, token); };
         Engine.ApproveSync = Dialogs.SyncAsync;
-        Engine.SyncChanged += () => Ui(() => { if (CurrentPage == "Sync") page?.Refresh(); });
-        Engine.Sync.Changed += () => Ui(() => { if (CurrentPage == "Sync") page?.Refresh(); });
-        Engine.Browser.Notes.Changed += () => Ui(() => { if (CurrentPage == "Text & links") page?.Refresh(); });
+        // Transfers and discovery report many times a second; the page catches up at most four times a second.
+        later.Tick += (_, _) => { later.Stop(); page?.Refresh(); };
+        Engine.SyncChanged += () => Ui(() => { if (CurrentPage == "Sync") Later(); });
+        Engine.Sync.Changed += () => Ui(() => { if (CurrentPage == "Sync") Later(); });
+        Engine.Browser.Notes.Changed += () => Ui(() => { if (CurrentPage == "Text & links") Later(); });
         Engine.Status += message => Ui(() => Tell(message));
-        Engine.PeersChanged += () => Ui(() => { if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces" or "Text & links") page?.Refresh(); });
-        Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home") page?.Refresh(); });
+        Engine.PeersChanged += () => Ui(() => { if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces" or "Text & links") Later(); });
+        Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home") Later(); });
         Engine.Browser.ApprovalRequested += device => Ui(() => { string text = device.Label + " wants to connect. Open hopo to allow it."; Tell(text); if (Store.Preferences.Notifications) Notify("New phone or browser", text); });
-        Engine.Transfers.Changed += _ => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") page?.Refresh(); });
+        Engine.Transfers.Changed += _ => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") Later(); });
         Engine.Transfers.PersistenceFailed += _ => Ui(() => Tell("History could not be saved. Check free space and permissions in the app's data folder."));
         Engine.Completed += record => Ui(() =>
         {
@@ -914,6 +922,11 @@ internal sealed class Shell : IDisposable
     /// <summary>Raised as soon as a PC or browser asks to send, before the approval window, so a minimized app is noticed.</summary>
     private void NotifyIncoming(ReceiveRequest request)
     {
+#if ANDROID
+        // Android shows its own notification with Accept and Decline (IncomingHook).
+        if (IncomingHook != null)
+            return;
+#endif
         if (Store.Preferences.Notifications)
             Notify(request.PeerName + " wants to send you files", $"{request.Manifest.Entries.Count} files · {Format.Bytes(request.Manifest.TotalBytes)}" + (request.Address.Length > 0 ? " · " + request.Address : ""));
     }
@@ -1029,6 +1042,7 @@ internal sealed class Shell : IDisposable
             return;
         disposed = true;
         networkTimer.Stop();
+        later.Stop();
 #if !ANDROID
         tray?.Dispose();
 #endif
