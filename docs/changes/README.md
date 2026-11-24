@@ -40,3 +40,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-24 | [hopo Windows: Send with hopo in the first Windows 11 right-click menu](2026-11-24-hopo-windows11-menu.md) |
 | 2026-11-24 | [hopo 2.6.4: no more freezes, delete a transfer, livelier send ring](2026-11-24-hopo-2.6.4-smooth-delete-ring.md) |
 | 2026-11-24 | [hopo for Android with the same screens as the PC](2026-11-24-hopo-android-same-ui.md) |
+| 2026-11-24 | [hopo Android: accept from the notification, trusted PCs, delete transfers, bigger Home labels](2026-11-24-hopo-android-accept-trust.md) |
