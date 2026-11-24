@@ -153,6 +153,8 @@ internal sealed class NotesPage : IPage
     public NotesPage(Shell app)
     {
         this.app = app;
+        draft.Text = app.PendingNote;
+        app.PendingNote = null;
         Button send = C.AsyncButton("Share text or link", async () =>
         {
             string content = SharedNotes.Validate(draft.Text);
@@ -166,7 +168,7 @@ internal sealed class NotesPage : IPage
             app.Tell("Text shared. Find it in Text & links on the receiving computer or its browser page.");
         }, true, "send");
         View = C.Stack(C.Header("Share", "Share text or a link", "Send a note or link to a nearby device."),
-            C.Space(C.Card(C.Stack(C.Space(C.Eyebrow("Message"), 8), C.Space(draft, 16), C.Space(C.Eyebrow("Send to"), 8), C.Inline(target, send), C.Space(C.Text("Up to 16,000 characters. Notes kept here are visible to connected browsers; an access code applies if you've turned one on. Nothing opens or copies automatically.", 11, "Muted"), 0, 12))), 28),
+            C.Space(C.Card(C.Stack(C.Space(C.Eyebrow("Message"), 8), C.Space(draft, 16), C.Space(C.Eyebrow("Send to"), 8), (OperatingSystem.IsAndroid() ? C.Stack(C.Space(target, 10), send) : C.Inline(target, send)), C.Space(C.Text("Up to 16,000 characters. Notes kept here are visible to connected browsers; an access code applies if you've turned one on. Nothing opens or copies automatically.", 11, "Muted"), 0, 12))), 28),
             C.Heading("Shared on this " + Shell.Platform, C.Small("Refresh", Refresh)), notes);
     }
     public void Refresh()

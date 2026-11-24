@@ -2,6 +2,14 @@ using Lantoss.Core;
 
 namespace Lantoss.Networking;
 
+public sealed record BrowserFile(string Id, string Name, long Size, string Path, DateTime ModifiedUtc, string Recipient = "");
+
+/// <summary>A phone or browser connected to the phone page; on Android there are never any.</summary>
+public sealed record BrowserDevice(string Handle, string Name, string Device, string Address, DateTime ConnectedUtc, DateTime LastSeenUtc, byte[]? Picture, bool Approved = true, bool Trusted = false)
+{
+    public string Label => Name.Length > 0 ? Name + " (" + Device + ")" : Device;
+}
+
 /// <summary>
 /// Android stand-in for the phone page server. ASP.NET Core does not run on Android, and a phone does not host the page for other phones,
 /// so this keeps only the members the transfer engine uses: shared notes and the shared-folder catalog. Nothing ever listens.
@@ -44,6 +52,44 @@ public sealed class BrowserPortal : IDisposable
     {
         get; set;
     }
+    public BrowserDevice[] Devices => [];
+    public BrowserFile[] Files => [];
+    public string[] BlockedAddresses => [];
+    public string IpUrl => "";
+    public string LocalAddressStatus => "The phone page runs on computers, not on a phone.";
+    public string CertificateFingerprint => "";
+    public void ResetConnections()
+    {
+    }
+    public void ClearFiles()
+    {
+    }
+    public void Remove(string id)
+    {
+    }
+    public void Approve(string handle)
+    {
+    }
+    public void Block(string handle)
+    {
+    }
+    public void Unblock(string address)
+    {
+    }
+    public void Disconnect(string handle)
+    {
+    }
+    public BrowserDevice[] Browsers => [];
+    public event Action<BrowserDevice>? ApprovalRequested
+    {
+        add
+        {
+        }
+        remove
+        {
+        }
+    }
+    public Task ShareAsync(IEnumerable<string> paths, CancellationToken token = default, string recipient = "") => Task.CompletedTask;
     public Task StartAsync(NetworkAdapter network, int port = 80) => Task.CompletedTask;
     public void ApplySecurityPolicy()
     {

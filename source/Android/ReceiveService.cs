@@ -21,8 +21,8 @@ public sealed class ReceiveService : Service
     {
         if (intent?.Action == StopAction)
         {
-            if (HopoHost.Ready && HopoHost.Engine.Running)
-                HopoHost.Engine.Stop();
+            if (Lantoss.Desktop.Shell.Current is { Engine.Running: true } shell)
+                shell.Ui(() => { if (shell.Engine.Running) shell.ToggleReceiving(); });
             StopForeground(StopForegroundFlags.Remove);
             StopSelf();
             return StartCommandResult.NotSticky;

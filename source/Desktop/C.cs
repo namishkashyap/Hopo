@@ -45,6 +45,29 @@ internal static class C
         {
             Margin = new(0, 0, 0, 28)
         };
+        // A phone is too narrow for the title and its buttons side by side: the buttons go below the title and wrap.
+        if (right != null && OperatingSystem.IsAndroid())
+        {
+            Control actions = right;
+            if (right is StackPanel { Orientation: Orientation.Horizontal } inline)
+            {
+                Control[] buttons = [.. inline.Children];
+                inline.Children.Clear();
+                WrapPanel wrap = new()
+                {
+                    Orientation = Orientation.Horizontal
+                };
+                foreach (Control button in buttons)
+                {
+                    button.Margin = new(0, 0, 8, 8);
+                    wrap.Children.Add(button);
+                }
+                actions = wrap;
+            }
+            actions.Margin = new(0, 14, 0, 0);
+            row.Children.Add(Stack(Eyebrow(eyebrow), Space(heading, 0, 6), Space(detail, 0, 8), actions));
+            return row;
+        }
         if (right != null)
         {
             DockPanel.SetDock(right, Dock.Right);
@@ -334,6 +357,18 @@ internal static class C
     }
     public static Grid Columns(Control left, Control right, double rightWidth = 340)
     {
+        // A phone stacks the two columns.
+        if (OperatingSystem.IsAndroid())
+        {
+            Grid rows = new()
+            {
+                RowDefinitions = new RowDefinitions("Auto,16,Auto")
+            };
+            Grid.SetRow(right, 2);
+            rows.Children.Add(left);
+            rows.Children.Add(right);
+            return rows;
+        }
         Grid grid = new()
         {
             ColumnDefinitions = new ColumnDefinitions($"*,20,{rightWidth}")

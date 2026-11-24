@@ -119,7 +119,12 @@ internal sealed class HomePage : IPage
         stage.Children.Add(Place(new Border { Width = 150, Height = 150, CornerRadius = new(75), Background = Theme.Brush("Glass"), BorderBrush = Theme.Brush("Text/18"), BorderThickness = new(1), BoxShadow = new BoxShadows(new BoxShadow { Blur = 60, Color = Theme.Color(Theme.Dark ? "GlowA/35" : "GlowA/25") }), Child = label, IsHitTestVisible = false }, Middle - 75, Middle - 75));
         stage.Children.Add(devices);
         foreach ((string key, string text, string icon) in new[] { ("send", "Send files", "send"), ("folder", "Folder", "folder"), ("text", "Text", "text"), ("phone", "Phone", "phone") })
+        {
+            // A phone cannot share a folder or host the phone page, so its dock keeps Send files and Text.
+            if (OperatingSystem.IsAndroid() && key is "folder" or "phone")
+                continue;
             dock[key] = C.Button(text, () => Open(sheet == key ? null : key), key == "send", icon);
+        }
         Border bar = new()
         {
             Child = C.Inline([.. dock.Values]),
@@ -260,7 +265,7 @@ internal sealed class HomePage : IPage
         {
             TextBlock title = C.Text("Open hopo on your other computer", 14, bold: true), detail = C.Text("Use the same home Wi-Fi. It will appear here automatically.", 12, "Muted");
             title.TextAlignment = detail.TextAlignment = TextAlignment.Center;
-            StackPanel actions = C.Inline(C.Small("Find a device", () => app.Dialogs.Pair(), true), C.Small("Phone & browser", () => app.Navigate("Phone & browser")));
+            StackPanel actions = OperatingSystem.IsAndroid() ? C.Inline(C.Small("Find a device", () => app.Dialogs.Pair(), true), C.Small("Connect manually", () => _ = app.Dialogs.PairManuallyAsync())) : C.Inline(C.Small("Find a device", () => app.Dialogs.Pair(), true), C.Small("Phone & browser", () => app.Navigate("Phone & browser")));
             actions.HorizontalAlignment = HorizontalAlignment.Center;
             Border card = C.Card(C.Stack(C.Space(title, 4), C.Space(detail, 14), actions), 18);
             card.Width = 320;
@@ -424,7 +429,7 @@ internal sealed class HomePage : IPage
         };
         body.Spacing = 14;
         Border card = C.Card(body, new Thickness(18));
-        card.Width = 440;
+        card.Width = Shell.Fit(440);
         card.Background = Theme.Brush(Theme.Dark ? "#0E0E18/92" : "Menu");
         card.BoxShadow = Theme.Shadow(30, 80, 0.5);
         card.RenderTransformOrigin = new RelativePoint(key switch
@@ -677,17 +682,24 @@ internal sealed class SendPage : IPage
     public SendPage(Shell app)
     {
         this.app = app;
-        StackPanel tools = C.Inline(C.AsyncButton("Add files", app.PickFilesAsync, icon: "plus"), C.AsyncButton("Add folder", app.PickFoldersAsync, icon: "folder"), C.Ghost(C.Button("Clear", () => { app.Selection.Clear(); Refresh(); })));
+        // Android cannot hand hopo a whole folder, and nothing is dropped onto a phone: it adds files only.
+        StackPanel tools = OperatingSystem.IsAndroid() ? C.Inline(C.AsyncButton("Add files", app.PickFilesAsync, icon: "plus"), C.Ghost(C.Button("Clear", () => { app.Selection.Clear(); Refresh(); }))) : C.Inline(C.AsyncButton("Add files", app.PickFilesAsync, icon: "plus"), C.AsyncButton("Add folder", app.PickFoldersAsync, icon: "folder"), C.Ghost(C.Button("Clear", () => { app.Selection.Clear(); Refresh(); })));
         tools.VerticalAlignment = VerticalAlignment.Center;
         DockPanel top = new();
-        DockPanel.SetDock(tools, Dock.Right);
+        if (OperatingSystem.IsAndroid())
+        {
+            DockPanel.SetDock(tools, Dock.Bottom);
+            tools.Margin = new(0, 12, 0, 0);
+        }
+        else
+            DockPanel.SetDock(tools, Dock.Right);
         top.Children.Add(tools);
         top.Children.Add(C.Stack(C.Text("Selected", 16, bold: true), C.Space(totals, 0, 4)));
         StackPanel drop = C.Inline(C.Icon("upload", 18, "Muted"), C.Text("Drop more files or folders here", 13, "Muted"));
         drop.Spacing = 10;
         drop.HorizontalAlignment = HorizontalAlignment.Center;
         // The whole window accepts dropped files; this area shows where to drop them.
-        StackPanel left = C.Stack(top, new Border { BorderBrush = Theme.Brush("Text/6"), BorderThickness = new(0, 1, 0, 0), Padding = new(0, 8, 0, 0), Margin = new(0, 16), Child = files }, C.Dashed(drop));
+        StackPanel left = C.Stack(top, new Border { BorderBrush = Theme.Brush("Text/6"), BorderThickness = new(0, 1, 0, 0), Padding = new(0, 8, 0, 0), Margin = new(0, 16), Child = files }, OperatingSystem.IsAndroid() ? new Panel() : C.Dashed(drop));
         Button phone = C.Link("Or share with a phone or browser", async () =>
         {
             if (app.Selection.Count > 0)
@@ -695,6 +707,7 @@ internal sealed class SendPage : IPage
             app.Navigate("Phone & browser");
         });
         phone.HorizontalAlignment = HorizontalAlignment.Center;
+        phone.IsVisible = !OperatingSystem.IsAndroid();
         StackPanel right = C.Stack(C.Card(C.Stack(recipient, C.Space(phone, 0, 10))), C.Space(C.Card(C.Stack(C.Point("The recipient stays in control", "They see your name, file count and size, then accept or decline."),
             C.Space(C.Point("Original bytes, verified", "Folders keep their structure. Every file is checked before it's finalized.", "check"), 0, 16)), 20), 0, 16));
         View = C.Stack(C.Header("Share", "Send files", "Pick files, then a device. They approve before anything moves."), C.Columns(C.Card(left), right, 340));

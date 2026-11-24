@@ -204,7 +204,7 @@ internal sealed class HistoryPage : IPage
     }
     private async Task ExportAsync()
     {
-        IStorageFile? file = await app.Window.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = "Export transfer metadata", SuggestedFileName = "hopo-history.csv", DefaultExtension = "csv" });
+        IStorageFile? file = await app.Storage.SaveFilePickerAsync(new FilePickerSaveOptions { Title = "Export transfer metadata", SuggestedFileName = "hopo-history.csv", DefaultExtension = "csv" });
         if (file == null)
             return;
         StringBuilder csv = new("Time UTC,Direction,Person or device,Status,Files,Bytes,Verified files,Skipped files\r\n");

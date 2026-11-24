@@ -129,11 +129,24 @@ public sealed record NetworkAdapter(string Name, IPAddress Address, IPAddress Ma
         byte[] b = address.GetAddressBytes();
         return b.Length == 4 && (b[0] == 10 || (b[0] == 172 && b[1] is >= 16 and <= 31) || (b[0] == 192 && b[1] == 168));
     }
-    public static NetworkAdapter[] Available() => NetworkInterface.GetAllNetworkInterfaces()
+    public static NetworkAdapter[] Available() => OperatingSystem.IsAndroid() ? Phone() : NetworkInterface.GetAllNetworkInterfaces()
         .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType is NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.Ethernet)
         .OrderByDescending(n => n.GetIPProperties().GatewayAddresses.Any(gateway => gateway.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !gateway.Address.Equals(IPAddress.Any)))
         .SelectMany(n => n.GetIPProperties().UnicastAddresses.Where(a => Private(a.Address)).Select(a => new NetworkAdapter(n.Name, a.Address, a.IPv4Mask, n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)))
         .OrderByDescending(a => a.Wireless).ToArray();
+    /// <summary>
+    /// Android reports its Wi-Fi (wlan0) without a usable type or status and cannot list gateways, so the phone's private Wi-Fi or Ethernet
+    /// addresses are found by interface name. Mobile data (rmnet) is never used: hopo stays on the home network.
+    /// </summary>
+    private static NetworkAdapter[] Phone() => NetworkInterface.GetAllNetworkInterfaces()
+        .Where(n => n.OperationalStatus is OperationalStatus.Up or OperationalStatus.Unknown && (n.Name.StartsWith("wlan", StringComparison.Ordinal) || n.Name.StartsWith("eth", StringComparison.Ordinal) || n.NetworkInterfaceType is NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.Ethernet))
+        .SelectMany(n => n.GetIPProperties().UnicastAddresses.Where(a => Private(a.Address)).Select(a => new NetworkAdapter(n.Name, a.Address, MaskOf(a.PrefixLength), !n.Name.StartsWith("eth", StringComparison.Ordinal))))
+        .OrderByDescending(a => a.Wireless).ToArray();
+    private static IPAddress MaskOf(int prefix)
+    {
+        uint bits = prefix is <= 0 or > 32 ? 0xFFFFFF00 : uint.MaxValue << (32 - prefix);
+        return new IPAddress([(byte)(bits >> 24), (byte)(bits >> 16), (byte)(bits >> 8), (byte)bits]);
+    }
     public static (IPAddress Address, int Port) ParseEndpoint(string input, bool allowLoopback = false)
     {
         string[] parts = input.Trim().Split(':');
