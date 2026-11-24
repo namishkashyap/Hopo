@@ -73,6 +73,8 @@ try {
                 $ErrorActionPreference = 'Stop'
                 if ($LASTEXITCODE -ne 0) { throw 'keytool could not create the Android signing key.' }
             }
+            # Always a clean build: a stale piece from an earlier build made the app close on start. Downloaded packages stay cached.
+            foreach ($lantossStale in @((Join-Path ($lantossArtifacts + '-android') 'obj'), (Join-Path ($lantossArtifacts + '-android') 'bin'), (Join-Path $lantossBuildRoot 'android-release'))) { if (Test-Path $lantossStale) { Remove-Item -LiteralPath $lantossStale -Recurse -Force } }
             Invoke-LantossDotnet (@('publish', (Join-Path $lantossSourceRoot 'Android\Lantoss.Android.csproj'), '-f', 'net10.0-android', "-p:AndroidSdkDirectory=$lantossSdk", "-p:JavaSdkDirectory=$lantossJdk", '-p:AndroidKeyStore=true', "-p:AndroidSigningKeyStore=$lantossKeyStore", '-p:AndroidSigningKeyAlias=hopo', '-p:AndroidSigningKeyPass=env:HOPO_ANDROID_KEY', '-p:AndroidSigningStorePass=env:HOPO_ANDROID_KEY', '-o', (Join-Path $lantossBuildRoot 'android-release')) + ($lantossSharedArgs -replace [regex]::Escape($lantossArtifacts), ($lantossArtifacts + '-android')))
         }
         finally { Remove-Item Env:HOPO_ANDROID_KEY -ErrorAction SilentlyContinue }

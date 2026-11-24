@@ -2,6 +2,9 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+#if ANDROID
+using Window = Lantoss.Desktop.OverlayWindow;
+#endif
 
 namespace Lantoss.Desktop;
 
@@ -19,7 +22,9 @@ internal sealed class Dialogs(Shell app)
         CanResize = false,
         WindowStartupLocation = WindowStartupLocation.CenterOwner,
         Background = Theme.Brush("Background"),
+#if !ANDROID
         Icon = app.Window.Icon
+#endif
     };
     private static ScrollViewer Body(StackPanel body)
     {
@@ -28,10 +33,14 @@ internal sealed class Dialogs(Shell app)
     }
     private async Task<T> ShowAsync<T>(Window dialog)
     {
+#if ANDROID
+        return await dialog.ShowDialog<T>(null);
+#else
         // Approvals can arrive while the window is minimized; bring hopo forward so the request is seen.
         if (!app.Window.IsVisible || app.Window.WindowState == WindowState.Minimized)
             app.ShowWindow();
         return await dialog.ShowDialog<T>(pairingWindow is { IsVisible: true } ? pairingWindow : app.Window);
+#endif
     }
     public Task MessageAsync(string title, string text)
     {
@@ -238,7 +247,14 @@ internal sealed class Dialogs(Shell app)
                 token.ThrowIfCancellationRequested();
                 Window window = Create("Incoming file transfer", 660);
                 string folder = request.DefaultFolder;
+#if ANDROID
+                // Each transfer arrives in its own private folder, then moves to Downloads/hopo where the Files app and gallery see it.
+                if (!request.FixedFolder)
+                    folder = Path.Combine(folder, request.Manifest.Id);
+                TextBlock location = C.Text("Downloads/hopo on this phone", 11, "Muted"), free = C.Text("", 12, "Muted");
+#else
                 TextBlock location = C.Text(folder, 11, "Muted"), free = C.Text("", 12, "Muted");
+#endif
                 ComboBox duplicates = new()
                 {
                     ItemsSource = new[] { "Keep both (number duplicate names)", "Skip existing files", "Replace existing files (confirm)" },
@@ -257,7 +273,7 @@ internal sealed class Dialogs(Shell app)
                 {
                     try
                     {
-                        long available = FileCatalog.FreeSpace(folder);
+                        long available = FileCatalog.FreeSpace(OperatingSystem.IsAndroid() ? request.DefaultFolder : folder);
                         free.Text = Format.Bytes(available) + " available · " + Format.Bytes(request.Manifest.TotalBytes) + " requested";
                         accept.IsEnabled = available >= request.Manifest.TotalBytes + 64L * 1024 * 1024;
                     }
@@ -274,6 +290,7 @@ internal sealed class Dialogs(Shell app)
                     CheckSpace();
                 });
                 choose.IsEnabled = !request.FixedFolder;
+                choose.IsVisible = !OperatingSystem.IsAndroid();
                 StackPanel names = C.Stack();
                 foreach (ManifestEntry entry in request.Manifest.Entries.Take(8))
                     names.Children.Add(C.Space(C.Text((entry.Directory ? "Folder · " : "File · ") + entry.RelativePath, 12), 7));

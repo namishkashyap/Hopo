@@ -9,16 +9,21 @@ using Avalonia.Android;
 
 namespace Lantoss.Android;
 
-/// <summary>The Android process: starts the shared engine before the first screen, and provides notifications and the Downloads folder.</summary>
+/// <summary>The Android process: opens the data store before the first screen, and provides notifications and the Downloads folder.</summary>
 [Application(Label = "hopo", Icon = "@drawable/icon", AllowBackup = false)]
-public sealed class AndroidApp : AvaloniaAndroidApplication<App>, IPhonePlatform
+public sealed class AndroidApp : AvaloniaAndroidApplication<App>
 {
+    public static AndroidApp? Current
+    {
+        get; private set;
+    }
     private const string Channel = "hopo";
     private WifiManager.MulticastLock? multicast;
     public AndroidApp(IntPtr handle, JniHandleOwnership ownership) : base(handle, ownership) { }
     public override void OnCreate()
     {
         // Anything that would close the app is written down first, so the next launch can show what happened.
+        Current = this;
         CrashReport.Initialize(FilesDir!.AbsolutePath);
         AndroidEnvironment.UnhandledExceptionRaiser += (_, e) => CrashReport.Save(e.Exception, "Android");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashReport.Save(e.ExceptionObject as Exception, "App");
@@ -34,14 +39,12 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App>, IPhonePlatform
         {
             // The real paths: /data/user/0 is a link to /data/data, and hopo refuses folders reached through links.
             HopoHost.Initialize(new Java.IO.File(FilesDir!.AbsolutePath).CanonicalPath, new Java.IO.File(CacheDir!.AbsolutePath).CanonicalPath, name);
-            MainView.WireEngine();
         }
         catch (Exception error)
         {
             HopoHost.StartupError = error.GetType().Name + ": " + error.Message;
             CrashReport.Save(error, "Start");
         }
-        MainView.Platform = this;
         // Android drops multicast packets unless an app holds this lock, and PCs are found through multicast.
         if (GetSystemService(WifiService) is WifiManager wifi)
         {
@@ -51,7 +54,8 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App>, IPhonePlatform
         }
         if (GetSystemService(NotificationService) is NotificationManager manager)
             manager.CreateNotificationChannel(new NotificationChannel(Channel, "Transfers", NotificationImportance.High) { Description = "Incoming files and finished transfers" });
-        return base.CustomizeAppBuilder(builder);
+        // The same Inter typeface as hopo on the PC, Mac and Linux.
+        return base.CustomizeAppBuilder(builder).WithInterFont();
     }
     public void Notify(string title, string text)
     {

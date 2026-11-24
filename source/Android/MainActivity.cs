@@ -29,7 +29,7 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnNewIntent(intent);
         HandleShare(intent);
     }
-    /// <summary>"Share to hopo" from another app: copy the shared items into the app, then ask which PC gets them.</summary>
+    /// <summary>"Share to hopo" from another app: shared files open Send with them selected; shared text or a link opens Text &amp; links.</summary>
     private void HandleShare(Intent? intent)
     {
         if (intent?.Action is not (Intent.ActionSend or Intent.ActionSendMultiple))
@@ -42,13 +42,12 @@ public sealed class MainActivity : AvaloniaMainActivity
         string? text = intent.GetStringExtra(Intent.ExtraText);
         // Handled once: rotating the screen must not share the same items again.
         intent.SetAction("");
-        string folder = Path.Combine(HopoHost.Outgoing, Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(folder);
+        string folder = HopoHost.NewBatch();
         List<string> paths = [];
         foreach (global::Android.Net.Uri uri in uris.Take(256))
             try
             {
-                string name = MainView.SafeName(DisplayName(uri) ?? "shared file");
+                string name = HopoHost.SafeName(DisplayName(uri) ?? "shared file");
                 string path = Path.Combine(folder, name);
                 for (int i = 2; File.Exists(path); i++)
                     path = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(name)} ({i}){Path.GetExtension(name)}");
@@ -65,10 +64,17 @@ public sealed class MainActivity : AvaloniaMainActivity
         // The screen may still be starting when the share arrives.
         Dispatcher.UIThread.Post(async () =>
         {
-            for (int i = 0; i < 50 && MainView.Current == null; i++)
+            for (int i = 0; i < 50 && Lantoss.Desktop.Shell.Current == null; i++)
                 await Task.Delay(100);
-            if (MainView.Current is { } view)
-                await view.ShareAsync([.. paths], folder, paths.Count == 0 ? text : null);
+            if (Lantoss.Desktop.Shell.Current is not { } shell)
+                return;
+            if (paths.Count > 0)
+                await shell.AddSelectionsAsync(paths);
+            else
+            {
+                shell.PendingNote = text;
+                shell.Navigate("Text & links");
+            }
         });
     }
     private static global::Android.Net.Uri? Stream(Intent intent) => Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu ? (global::Android.Net.Uri?)intent.GetParcelableExtra(Intent.ExtraStream, Java.Lang.Class.FromType(typeof(global::Android.Net.Uri))) : (global::Android.Net.Uri?)intent.GetParcelableExtra(Intent.ExtraStream);

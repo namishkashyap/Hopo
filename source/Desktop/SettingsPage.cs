@@ -68,7 +68,7 @@ internal sealed class SettingsPage : IPage
             approve = Check("Ask before a new PC or phone connects", saved.ApproveNewDevices),
             https = Check("Encrypt the phone page (HTTPS)", saved.BrowserHttps);
         string folder = saved.ReceiveFolder;
-        TextBlock folderText = C.Text(folder, 12, "Muted");
+        TextBlock folderText = C.Text(OperatingSystem.IsAndroid() ? "Downloads/hopo, where the Files app and gallery show them" : folder, 12, "Muted");
         Button folderPicker = C.AsyncButton("Choose receive folder", async () =>
         {
             string[] picked = await app.PickFoldersAsync("Choose the local receive folder");
@@ -78,6 +78,7 @@ internal sealed class SettingsPage : IPage
             folder = picked[0];
             folderText.Text = folder;
         }, icon: "folder");
+        folderPicker.IsVisible = !OperatingSystem.IsAndroid();
         Button save = C.Button("Save changes", () =>
         {
             app.Store.SetPreferences(app.Store.Preferences with

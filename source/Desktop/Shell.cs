@@ -32,8 +32,14 @@ internal sealed class Shell : IDisposable
 {
     public static readonly string[] Pages = ["Home", "Send", "Transfers", "Devices", "Phone & browser", "Text & links", "Shared Spaces", "Sync", "History", "Settings"];
     // Menu rows: page, title, subtitle (Share group only) and icon.
+#if ANDROID
+    // A phone cannot host the phone page, share folders or sync them; those pages stay on computers.
+    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text")];
+    private static readonly (string Page, string Icon)[] ManageMenu = [("Transfers", "transfer"), ("Devices", "devices"), ("History", "history"), ("Settings", "settings")];
+#else
     private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Shared Spaces", "Share a folder", "Shared spaces for your PCs", "folder"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text"), ("Phone & browser", "Phone & browser", "Scan a QR code, no app needed", "phone")];
     private static readonly (string Page, string Icon)[] ManageMenu = [("Transfers", "transfer"), ("Devices", "devices"), ("Sync", "sync"), ("History", "history"), ("Settings", "settings")];
+#endif
     private static readonly string[] Searchable = ["Send", "Transfers", "Devices", "Text & links", "Shared Spaces", "History"];
     /// <summary>The name shown in the breadcrumb; page keys stay stable for navigation and renders.</summary>
     public static string Title(string page) => page switch
@@ -43,10 +49,38 @@ internal sealed class Shell : IDisposable
         _ => page
     };
     public static Shell Current { get; private set; } = null!;
+#if !ANDROID
     public Window Window
     {
         get;
     }
+#endif
+    /// <summary>Everything hopo draws: a desktop window holds it on macOS and Linux, the activity's screen on Android.</summary>
+    public Panel Root { get; } = new();
+    // Dialogs on Android: in-app panels above the pages (Android has no separate windows).
+    private readonly Panel overlays = new();
+    // Phones draw under the status and gesture bars; the pages, menu and dialogs keep clear of them (zero on desktops).
+    private Thickness safeArea;
+    private Control mainLayer = new Panel();
+    private void Inset(Thickness area)
+    {
+        safeArea = area;
+        mainLayer.Margin = menu.Margin = overlays.Margin = area;
+    }
+    /// <summary>A width that fits the screen: phones are narrower than the design's panels.</summary>
+    public static double Fit(double width) => Current?.Root.Bounds.Width is > 0 and var available ? Math.Min(width, available - 24) : width;
+#if ANDROID
+    /// <summary>Android notifications, set by the Android app.</summary>
+    public static Action<string, string>? NotifyHook
+    {
+        get; set;
+    }
+    /// <summary>Copies a picked Android document (a content URI) into the app's cache so it can be sent; set by the Android app.</summary>
+    public static Func<IStorageFile, Task<string?>>? ImportHook
+    {
+        get; set;
+    }
+#endif
     public MetadataStore Store
     {
         get;
@@ -79,8 +113,13 @@ internal sealed class Shell : IDisposable
         get; set;
     }
     public string CurrentPage { get; private set; } = "Home";
+    /// <summary>Text shared into hopo from another app, placed in the Text &amp; links message box once.</summary>
+    public string? PendingNote
+    {
+        get; set;
+    }
     public string Search => search.Text?.Trim() ?? "";
-    public static string Platform => OperatingSystem.IsMacOS() ? "Mac" : OperatingSystem.IsLinux() ? "Linux PC" : "PC";
+    public static string Platform => OperatingSystem.IsAndroid() ? "phone" : OperatingSystem.IsMacOS() ? "Mac" : OperatingSystem.IsLinux() ? "Linux PC" : "PC";
     private readonly DispatcherTimer networkTimer = new() { Interval = TimeSpan.FromSeconds(10) };
     private TextBox search = new();
     private TextBlock feedback = new(), networkStatus = new(), pageTitle = new(), slash = new(), storageText = new();
@@ -92,8 +131,11 @@ internal sealed class Shell : IDisposable
     private Border header = new(), body = new(), menuPanel = new(), scrim = new();
     private Panel menu = new();
     private IPage? page;
+#if !ANDROID
     private TrayIcon? tray;
-    private bool exitRequested, closing, allowClose, disposed, selecting, sharingStoppedManually, trayNoticeShown;
+    private bool exitRequested, allowClose, trayNoticeShown;
+#endif
+    private bool closing, disposed, selecting, sharingStoppedManually;
     private string networkSignature = "";
     public Shell(MetadataStore store, Identity identity, bool preview)
     {
@@ -102,6 +144,7 @@ internal sealed class Shell : IDisposable
         Preview = preview;
         Engine = new(store, identity, allowLoopback: preview);
         Dialogs = new(this);
+#if !ANDROID
         Window = new()
         {
             Title = "hopo",
@@ -110,8 +153,10 @@ internal sealed class Shell : IDisposable
             MinWidth = 900,
             MinHeight = 620,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
-            Icon = AppIcon() is { } icon ? new WindowIcon(icon) : null
+            Icon = AppIcon() is { } icon ? new WindowIcon(icon) : null,
+            Content = Root
         };
+#endif
         Engine.ApprovePair = Dialogs.CompareAsync;
         Engine.ApproveReceive = (request, token) => { Ui(() => NotifyIncoming(request)); return Dialogs.ReceiveAsync(request, token); };
         Engine.ApproveSync = Dialogs.SyncAsync;
@@ -129,8 +174,7 @@ internal sealed class Shell : IDisposable
             if (Store.Preferences.Notifications)
                 Notify(record.Direction == "Received" ? "Files received" : "Transfer finished", $"{record.FileCount} files · {record.PeerName}");
         });
-        Window.Closing += OnClosing;
-        Window.KeyDown += (_, e) =>
+        Root.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape && menu.IsVisible)
             {
@@ -139,19 +183,40 @@ internal sealed class Shell : IDisposable
             }
         };
         networkTimer.Tick += (_, _) => RecoverNetwork();
-        Window.Opened += (_, _) =>
+#if ANDROID
+        // Android: start when the screen first shows, and let Back close a panel, then the menu, then return to Home.
+        bool started = false;
+        Root.AttachedToVisualTree += (_, _) =>
         {
-            if (preview)
-                return;
-            networkTimer.Start();
-            if (!Store.Preferences.StartReceivingOnOpen || Engine.Running)
-                return;
-            try
+            if (TopLevel.GetTopLevel(Root) is { } top)
             {
-                ToggleReceiving();
+                top.BackRequested -= OnBack;
+                top.BackRequested += OnBack;
+                // Android draws apps under the status and gesture bars; the pages keep clear of them. The safe area is read in display units;
+                // a value far larger than any bar is in screen pixels and is scaled down.
+                if (top.InsetsManager is { } insets)
+                {
+                    void Apply()
+                    {
+                        Thickness area = insets.SafeAreaPadding;
+                        if (Math.Max(area.Top, area.Bottom) > 80 && top.RenderScaling > 1)
+                            area = new(area.Left / top.RenderScaling, area.Top / top.RenderScaling, area.Right / top.RenderScaling, area.Bottom / top.RenderScaling);
+                        if (area != safeArea)
+                            Inset(area);
+                    }
+                    Apply();
+                    insets.SafeAreaChanged += (_, _) => Apply();
+                    Root.SizeChanged += (_, _) => Apply();
+                }
             }
-            catch (Exception error) { Tell("Nearby connection could not start. " + TransferEngine.HumanError(error)); }
+            if (started)
+                return;
+            started = true;
+            Started();
         };
+#else
+        Window.Closing += OnClosing;
+        Window.Opened += (_, _) => Started();
         DragDrop.SetAllowDrop(Window, true);
         Window.AddHandler(DragDrop.DropEvent, async (_, e) =>
         {
@@ -159,16 +224,83 @@ internal sealed class Shell : IDisposable
             if (paths.Length > 0)
                 await AddSelectionsAsync(paths);
         });
+#endif
         if (Application.Current?.PlatformSettings is { } settings)
             settings.ColorValuesChanged += (_, _) => { if (Store.Preferences.Theme == "System") Ui(() => ApplyTheme("System")); };
+#if !ANDROID
         if (!preview)
             CreateTray();
+#endif
         Motion.Setup(preview);
         ApplyTheme(store.Preferences.Theme);
         if (Engine.Sync.RecoveryNotice != null)
             Tell(Engine.Sync.RecoveryNotice);
         if (store.RecoveryNotice != null)
             Tell(store.RecoveryNotice);
+    }
+    private void Started()
+    {
+        if (Preview)
+            return;
+        networkTimer.Start();
+        if (!Store.Preferences.StartReceivingOnOpen || Engine.Running)
+            return;
+        try
+        {
+            ToggleReceiving();
+        }
+        catch (Exception error) { Tell("Nearby connection could not start. " + TransferEngine.HumanError(error)); }
+    }
+#if ANDROID
+    private void OnBack(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (overlays.Children.Count > 0 && overlays.Children[^1] is Control top && Back.TryGetValue(top, out Action? close))
+            close();
+        else if (menu.IsVisible)
+            CloseMenu();
+        else if (CurrentPage != "Home")
+            Navigate("Home");
+        else
+            return;
+        e.Handled = true;
+    }
+#endif
+    private static readonly Dictionary<Control, Action> Back = [];
+    /// <summary>Shows a dialog as an in-app panel over a dimmed page; <paramref name="cancel"/> runs when Back or a tap outside closes it.</summary>
+    public Control ShowOverlay(Control panel, Action cancel)
+    {
+        Border scrimLayer = new()
+        {
+            Background = Theme.Brush("Scrim")
+        };
+        scrimLayer.PointerPressed += (_, _) => cancel();
+        Border card = new()
+        {
+            Child = panel is ScrollViewer ? panel : new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
+            Background = Theme.Brush("Background"),
+            BorderBrush = Theme.Brush("GlassBorder"),
+            BorderThickness = new(1),
+            CornerRadius = new(22),
+            Margin = new(12, 36),
+            MaxHeight = Math.Max(240, Root.Bounds.Height - 72),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center,
+            BoxShadow = Theme.Shadow(30, 80, 0.6)
+        };
+        Panel layer = new()
+        {
+            Children = { scrimLayer, card }
+        };
+        Back[layer] = cancel;
+        overlays.Children.Add(layer);
+        Motion.Fade(scrimLayer, 0.3);
+        Motion.Open(card);
+        return layer;
+    }
+    public void HideOverlay(Control layer)
+    {
+        Back.Remove(layer);
+        overlays.Children.Remove(layer);
     }
     public static Stream? AppIcon()
     {
@@ -187,6 +319,7 @@ internal sealed class Shell : IDisposable
         if (!Preview)
             _ = Dialogs.MessageAsync("hopo", TransferEngine.HumanError(error));
     }
+#if !ANDROID
     public void ShowWindow()
     {
         Window.Show();
@@ -194,6 +327,7 @@ internal sealed class Shell : IDisposable
             Window.WindowState = WindowState.Normal;
         Window.Activate();
     }
+#endif
     /// <summary>Appearance changes rebuild the shell with the new palette, keeping the current page, selection and engine.</summary>
     public void ApplyTheme(string mode)
     {
@@ -206,7 +340,10 @@ internal sealed class Shell : IDisposable
     }
     private void Build(string mode)
     {
+        Root.Background = Theme.Brush("Background");
+#if !ANDROID
         Window.Background = Theme.Brush("Background");
+#endif
         // The hopo field behind every page: a purple glow top-left, a green glow bottom-right and faint rings centred on the window.
         Panel field = new()
         {
@@ -261,7 +398,15 @@ internal sealed class Shell : IDisposable
             VerticalAlignment = VerticalAlignment.Center
         };
         receiveToggle = C.Button("Start receiving", ToggleReceiving);
+#if ANDROID
+        // A phone keeps the mark, a status dot, the receive button and the menu; the address is in the menu and on Devices.
+        networkStatus.IsVisible = false;
+        chip.Padding = new(10, 0);
+        slash.IsVisible = pageTitle.IsVisible = false;
+        StackPanel actions = C.Inline(chip, receiveToggle, C.IconButton("menu", OpenMenu, "Open menu"));
+#else
         StackPanel actions = C.Inline(search, chip, receiveToggle, C.IconButton("menu", OpenMenu, "Open menu"));
+#endif
         actions.Spacing = 10;
         actions.VerticalAlignment = VerticalAlignment.Center;
         DockPanel headerLayout = new();
@@ -270,7 +415,7 @@ internal sealed class Shell : IDisposable
         headerLayout.Children.Add(crumbs);
         header = new()
         {
-            Padding = new(32, 18),
+            Padding = OperatingSystem.IsAndroid() ? new(14, 12) : new(32, 18),
             BorderBrush = Theme.Brush("Text/6"),
             Child = headerLayout
         };
@@ -280,7 +425,7 @@ internal sealed class Shell : IDisposable
         };
         scroll = new()
         {
-            Content = new Border { MaxWidth = 1120, Padding = new(32, 48, 32, 64), Child = content },
+            Content = new Border { MaxWidth = 1120, Padding = OperatingSystem.IsAndroid() ? new(14, 18, 14, 48) : new(32, 48, 32, 64), Child = content },
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
         };
         body = new();
@@ -291,7 +436,7 @@ internal sealed class Shell : IDisposable
         {
             BorderBrush = Theme.Brush("Text/6"),
             BorderThickness = new(0, 1, 0, 0),
-            Padding = new(32, 7),
+            Padding = OperatingSystem.IsAndroid() ? new(14, 7) : new(32, 7),
             Child = feedback
         };
         Grid main = new()
@@ -306,7 +451,7 @@ internal sealed class Shell : IDisposable
         // The menu slides over a scrim from the right; the scrim, the close button and Escape dismiss it.
         menuPanel = new()
         {
-            Width = 380,
+            Width = Fit(380),
             Margin = new(18, 4, 18, 24),
             HorizontalAlignment = HorizontalAlignment.Right,
             CornerRadius = new(24),
@@ -322,7 +467,12 @@ internal sealed class Shell : IDisposable
         };
         scrim.PointerPressed += (_, _) => CloseMenu();
         menu = new Panel { IsVisible = false, Children = { scrim, menuPanel } };
-        Window.Content = new Panel { Children = { field, main, menu } };
+        overlays.Children.Clear();
+        Back.Clear();
+        Root.Children.Clear();
+        Root.Children.AddRange([field, main, menu, overlays]);
+        mainLayer = main;
+        Inset(safeArea);
     }
     public void CloseMenu() => menu.IsVisible = false;
     public void OpenMenu()
@@ -385,13 +535,14 @@ internal sealed class Shell : IDisposable
         Grid layout = new()
         {
             RowDefinitions = new RowDefinitions("*,Auto"),
-            MinHeight = Math.Max(0, Window.ClientSize.Height - 28 - 30)
+            MinHeight = Math.Max(0, Root.Bounds.Height - 28 - 30)
         };
         Grid.SetRow(bottom, 1);
         layout.Children.Add(items);
         layout.Children.Add(bottom);
         menuPanel.Child = new ScrollViewer { Content = layout, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         UpdateStatus();
+        menuPanel.Width = Fit(380);
         menu.IsVisible = true;
         // The scrim fades in, the panel grows from the menu button and the rows fade up one after another.
         menuPanel.RenderTransformOrigin = new RelativePoint(menuPanel.Width - 36, 38, RelativeUnit.Absolute);
@@ -461,8 +612,8 @@ internal sealed class Shell : IDisposable
         search.Text = "";
         bool home = destination == "Home";
         pageTitle.Text = Title(destination);
-        slash.IsVisible = pageTitle.IsVisible = !home;
-        search.IsVisible = Searchable.Contains(destination);
+        slash.IsVisible = pageTitle.IsVisible = !home && !OperatingSystem.IsAndroid();
+        search.IsVisible = Searchable.Contains(destination) && !OperatingSystem.IsAndroid();
         header.BorderThickness = new(0, 0, 0, home ? 0 : 1);
         page = destination switch
         {
@@ -516,7 +667,8 @@ internal sealed class Shell : IDisposable
         thisDevice.Content = card;
         try
         {
-            DriveInfo drive = new(Path.GetPathRoot(Path.GetFullPath(Store.Preferences.ReceiveFolder))!);
+            // On Android the root is the small system partition; the receive folder itself names the data partition.
+            DriveInfo drive = new(OperatingSystem.IsAndroid() ? Store.Preferences.ReceiveFolder : Path.GetPathRoot(Path.GetFullPath(Store.Preferences.ReceiveFolder))!);
             storageText.Text = $"{Format.Bytes(drive.AvailableFreeSpace)} free of {Format.Bytes(drive.TotalSize)}";
             storageBar.Value = 100.0 * (drive.TotalSize - drive.AvailableFreeSpace) / Math.Max(1, drive.TotalSize);
         }
@@ -590,12 +742,25 @@ internal sealed class Shell : IDisposable
             throw new IOException("Browser sharing could not start. Check the selected network in Settings.");
         Open(new Uri(new Uri(Engine.Browser.Url), relative).AbsoluteUri);
     }
-    /// <summary>Opens a URL, file or folder with the system handler (open on macOS, xdg-open on Linux).</summary>
-    public static void Open(string target) => Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose();
+    /// <summary>Opens a URL, file or folder with the system handler (open on macOS, xdg-open on Linux, the browser on Android).</summary>
+    public static void Open(string target)
+    {
+#if ANDROID
+        if (Uri.TryCreate(target, UriKind.Absolute, out Uri? link) && link.Scheme is "http" or "https" && TopLevel.GetTopLevel(Current.Root) is { } top)
+            _ = top.Launcher.LaunchUriAsync(link);
+#else
+        Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose();
+#endif
+    }
     public void Reveal(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
             return;
+#if ANDROID
+        // Android keeps app folders private; received files are moved to Downloads/hopo, which the Files app shows.
+        Tell("Received files are in Downloads/hopo. Open the Files app to see them.");
+        return;
+#endif
         string full = Path.GetFullPath(path);
         if (!Directory.Exists(full) && !File.Exists(full))
             throw new FileNotFoundException("This location is no longer available.");
@@ -609,19 +774,38 @@ internal sealed class Shell : IDisposable
     }
     public async Task CopyAsync(string text, string message)
     {
-        if (TopLevel.GetTopLevel(Window)?.Clipboard is { } clipboard)
+        if (TopLevel.GetTopLevel(Root)?.Clipboard is { } clipboard)
             await clipboard.SetTextAsync(text);
         Tell(message);
     }
+    public IStorageProvider Storage => TopLevel.GetTopLevel(Root)?.StorageProvider ?? throw new InvalidOperationException("hopo is not on screen.");
     public async Task<string[]> PickFilesAsync(string title, bool multiple = true, IReadOnlyList<FilePickerFileType>? filter = null)
     {
-        IReadOnlyList<IStorageFile> files = await Window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = title, AllowMultiple = multiple, FileTypeFilter = filter });
+        IReadOnlyList<IStorageFile> files = await Storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = title, AllowMultiple = multiple, FileTypeFilter = filter });
+#if ANDROID
+        // Android hands out documents, not paths: each is copied into the app's cache first.
+        List<string> copied = [];
+        if (files.Count > 0)
+            Tell("Preparing " + files.Count + (files.Count == 1 ? " file…" : " files…"));
+        foreach (IStorageFile file in files)
+            if (ImportHook != null && await ImportHook(file) is string path)
+                copied.Add(path);
+        return [.. copied];
+#else
         return files.Select(file => file.TryGetLocalPath()).OfType<string>().ToArray();
+#endif
     }
     public async Task<string[]> PickFoldersAsync(string title, bool multiple = false)
     {
-        IReadOnlyList<IStorageFolder> folders = await Window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = title, AllowMultiple = multiple });
+#if ANDROID
+        // Android folder access is not a path hopo can read; files are chosen one by one instead.
+        await Task.CompletedTask;
+        Tell("On Android, choose files instead of folders.");
+        return [];
+#else
+        IReadOnlyList<IStorageFolder> folders = await Storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = title, AllowMultiple = multiple });
         return folders.Select(folder => folder.TryGetLocalPath()).OfType<string>().ToArray();
+#endif
     }
     public async Task PickFilesAsync() => await AddSelectionsAsync(await PickFilesAsync("Choose files to send"));
     public async Task PickFoldersAsync() => await AddSelectionsAsync(await PickFoldersAsync("Choose folders to send", true));
@@ -700,6 +884,10 @@ internal sealed class Shell : IDisposable
         Tell(title + " · " + body);
         if (Preview)
             return;
+#if ANDROID
+        NotifyHook?.Invoke(title, body);
+        return;
+#endif
         try
         {
             ProcessStartInfo info;
@@ -729,6 +917,7 @@ internal sealed class Shell : IDisposable
         if (Store.Preferences.Notifications)
             Notify(request.PeerName + " wants to send you files", $"{request.Manifest.Entries.Count} files · {Format.Bytes(request.Manifest.TotalBytes)}" + (request.Address.Length > 0 ? " · " + request.Address : ""));
     }
+#if !ANDROID
     private void CreateTray()
     {
         try
@@ -833,13 +1022,16 @@ internal sealed class Shell : IDisposable
             bitmap.Save(Path.Combine(folder, file), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
         }
     }
+#endif
     public void Dispose()
     {
         if (disposed)
             return;
         disposed = true;
         networkTimer.Stop();
+#if !ANDROID
         tray?.Dispose();
+#endif
         Engine.Dispose();
     }
 }
