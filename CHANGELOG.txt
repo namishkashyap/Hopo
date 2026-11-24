@@ -1,3 +1,12 @@
+2026-11-24 - hopo 2.6.2: smoother app, taskbar icon, send ring
+
+Windows: Home no longer lags. Its animations run at a steady 30 frames a second,
+stop when hopo is minimised or in the tray, and no longer pile up during
+transfers. The taskbar shows the hopo icon, and the icon is sharp at every size.
+New: select files in File Explorer or on the desktop and press Ctrl+Shift+S to
+send them from a ring of your connected PCs and phones (change or turn off the
+shortcut in Settings).
+
 2026-11-24 - hopo 2.6.0: fixes from the break test, and hopo for Android
 
 Windows: hopo starts even when its data files are damaged, locked or very large,
