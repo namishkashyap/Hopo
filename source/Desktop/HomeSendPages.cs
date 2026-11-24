@@ -640,6 +640,8 @@ internal sealed class HomePage : IPage
                 targets.Children.Add(Chip(peer.Name, null, noteKey == peer.Fingerprint, () => { noteKey = peer.Fingerprint; fillSheet?.Invoke(); }));
             targets.Children.Add(Chip("This " + Shell.Platform + " (for my phone)", null, !peers.Any(p => p.Fingerprint == noteKey), () => { noteKey = ""; fillSheet?.Invoke(); }));
         };
+        // The message box is kept between openings so a draft survives; the previous panel still holds it.
+        (message.Parent as Panel)?.Children.Remove(message);
         return Sheet("Share text or a link", C.Stack(C.Space(C.Text("Message", 12, "Muted"), 6), message), Labelled("Send to", targets), share);
     }
     private StackPanel PhoneSheet()
