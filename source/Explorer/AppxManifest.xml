@@ -7,18 +7,19 @@
  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
  IgnorableNamespaces="uap uap10 rescap com desktop4 desktop5">
- <Identity Name="Lantoss.ExplorerIntegration" Publisher="CN=Lantoss Development" Version="1.9.0.0" ProcessorArchitecture="x64" />
- <Properties><DisplayName>Lantoss</DisplayName><PublisherDisplayName>Lantoss Development</PublisherDisplayName><Logo>Assets\Logo.png</Logo><uap10:AllowExternalContent>true</uap10:AllowExternalContent></Properties>
+ <!-- build-explorer.ps1 fills in the {placeholders} once for hopo Users and once for hopo Admin. -->
+ <Identity Name="{Name}" Publisher="CN=Lantoss Development" Version="{Version}" ProcessorArchitecture="x64" />
+ <Properties><DisplayName>{Display}</DisplayName><PublisherDisplayName>hopo</PublisherDisplayName><Logo>Assets\Logo.png</Logo><uap10:AllowExternalContent>true</uap10:AllowExternalContent></Properties>
  <Resources><Resource Language="en-us" /></Resources>
  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
  <Applications>
-  <Application Id="Lantoss" Executable="Lantoss.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
-   <uap:VisualElements DisplayName="Lantoss" Description="Share files on your home Wi-Fi" BackgroundColor="transparent" Square150x150Logo="Assets\Logo.png" Square44x44Logo="Assets\SmallLogo.png" AppListEntry="none" />
+  <Application Id="Lantoss" Executable="{Executable}" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
+   <uap:VisualElements DisplayName="{Display}" Description="Share files on your home Wi-Fi" BackgroundColor="transparent" Square150x150Logo="Assets\Logo.png" Square44x44Logo="Assets\SmallLogo.png" AppListEntry="none" />
    <Extensions>
-    <com:Extension Category="windows.comServer"><com:ComServer><com:SurrogateServer DisplayName="Lantoss sharing menu"><com:Class Id="18F23026-095D-4FD5-AEF4-7DDF06847DE9" Path="LantossExplorer.dll" ThreadingModel="STA" /></com:SurrogateServer></com:ComServer></com:Extension>
+    <com:Extension Category="windows.comServer"><com:ComServer><com:SurrogateServer DisplayName="{Display} sharing menu"><com:Class Id="{Clsid}" Path="LantossExplorer.dll" ThreadingModel="STA" /></com:SurrogateServer></com:ComServer></com:Extension>
     <desktop4:Extension Category="windows.fileExplorerContextMenus"><desktop4:FileExplorerContextMenus>
-     <desktop5:ItemType Type="*"><desktop5:Verb Id="ShareWithLantoss" Clsid="18F23026-095D-4FD5-AEF4-7DDF06847DE9" /></desktop5:ItemType>
-     <desktop5:ItemType Type="Directory"><desktop5:Verb Id="ShareFolderWithLantoss" Clsid="18F23026-095D-4FD5-AEF4-7DDF06847DE9" /></desktop5:ItemType>
+     <desktop5:ItemType Type="*"><desktop5:Verb Id="ShareWithLantoss" Clsid="{Clsid}" /></desktop5:ItemType>
+     <desktop5:ItemType Type="Directory"><desktop5:Verb Id="ShareFolderWithLantoss" Clsid="{Clsid}" /></desktop5:ItemType>
     </desktop4:FileExplorerContextMenus></desktop4:Extension>
    </Extensions>
   </Application>

@@ -12,9 +12,8 @@ internal sealed class WindowsIntegration
     public static void RemoveUserIntegration()
     {
         string app = Environment.ProcessPath ?? "";
-        // The legacy Windows 11 menu package belonged to hopo Users (Lantoss); hopo Admin's uninstall leaves it alone.
-        if (!DesktopRegistration.IsAdmin(app))
-            ExplorerPackage.Remove();
+        // Each app removes only its own Windows 11 menu package.
+        ExplorerPackage.Remove();
         // Installer cleanup must not open metadata, create an identity or start a server. Only this app's own entries are removed.
         using (RegistryKey? run = Registry.CurrentUser.OpenSubKey(DesktopRegistration.RunKey, true))
             run?.DeleteValue(DesktopRegistration.RunValueFor(app), false);
@@ -54,7 +53,12 @@ internal sealed class WindowsIntegration
         if (ExplorerPackage.Supported)
         {
             if (enabled && !ExplorerPackage.InstalledHere && ExplorerPackage.Packaged)
-                ExplorerPackage.Install();
+                try
+                {
+                    ExplorerPackage.Install();
+                }
+                // Trust declined: the classic entry under Show more options is used instead.
+                catch (OperationCanceledException) { }
             else if (!enabled && ExplorerPackage.InstalledHere)
                 ExplorerPackage.Remove();
         }
@@ -74,7 +78,7 @@ internal sealed class WindowsIntegration
     {
         if (!ShellEnabled)
             return;
-        if (ExplorerPackage.Packaged)
+        if (ExplorerPackage.InstalledHere)
         {
             // The native command reads a tiny cached list; never touch the metadata store from Explorer.
             Peer[] targets = peers.Where(peer => peer.Paired && !peer.Blocked && peer.Fingerprint.Length == 64 && peer.Fingerprint.All(Uri.IsHexDigit))
@@ -84,10 +88,10 @@ internal sealed class WindowsIntegration
                 return;
             foreach (string root in DesktopRegistration.MenuKeysFor(executable))
                 Registry.CurrentUser.DeleteSubKeyTree(root, false);
-            Registry.CurrentUser.DeleteSubKeyTree(DesktopRegistration.SettingsKey + @"\Peers", false);
+            Registry.CurrentUser.DeleteSubKeyTree(DesktopRegistration.SettingsKeyFor(executable) + @"\Peers", false);
             foreach (Peer peer in targets)
             {
-                using RegistryKey target = Registry.CurrentUser.CreateSubKey(DesktopRegistration.SettingsKey + @"\Peers\" + peer.Fingerprint.ToUpperInvariant());
+                using RegistryKey target = Registry.CurrentUser.CreateSubKey(DesktopRegistration.SettingsKeyFor(executable) + @"\Peers\" + peer.Fingerprint.ToUpperInvariant());
                 target.SetValue("Name", new string(peer.Name.Where(c => !char.IsControl(c)).Take(64).ToArray()));
             }
             signature = nextTargets;

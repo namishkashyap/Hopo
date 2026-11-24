@@ -6,13 +6,15 @@
   <?define AppKey = "Software\Lantoss\AdminInstallation" ?><?define RunName = "hopo Admin" ?><?define DesktopKey = "Software\Lantoss\AdminDesktop" ?><?define ShellName = "hopoAdmin" ?><?define AppId = "hopo.Admin" ?>
   <?define GuidApp = "8C4F1E2A-6B3D-4A7C-9E5F-1D2B3C4A5E60" ?><?define GuidRegister = "3E9A7C1B-5D2F-4B8E-A6C4-2F1E0D9B8A71" ?><?define GuidDocs = "B2D4F6A8-1C3E-4D5F-8A9B-7C6D5E4F3A21" ?>
   <?define GuidMenu = "E1F2A3B4-C5D6-4E7F-8A9B-0C1D2E3F4A52" ?><?define GuidDesktop = "F6E5D4C3-B2A1-4F0E-9D8C-7B6A5F4E3D13" ?><?define GuidRun = "A9B8C7D6-E5F4-4A3B-8C2D-1E0F9A8B7C64" ?><?define GuidShell = "23A6A1ED-4F89-4918-AD34-E3B2AB4645E6" ?>
+  <?define ExplorerPackage = "hopoAdmin.Explorer.msix" ?><?define GuidMenuFiles = "54154508-D7D5-4AEB-BB19-2D84A8ED2574" ?><?define GuidAssets = "2DF0734A-1631-4B18-9AD3-89AFD8714D2D" ?>
   <?else ?>
   <?define AppName = "hopo Users" ?><?define AppExe = "hopoUsers.exe" ?><?define AppFolder = "hopo" ?><?define AppUpgrade = "C9C1C9EF-9399-4CAB-A89E-D84BE5C41067" ?>
   <?define AppKey = "Software\Lantoss\Installation" ?><?define RunName = "Lantoss" ?><?define DesktopKey = "Software\Lantoss\Desktop" ?><?define ShellName = "Lantoss" ?><?define AppId = "hopo.LocalFileSharing" ?>
   <?define GuidApp = "20A4372C-84B0-4264-AB42-70866890481A" ?><?define GuidRegister = "90DC53A7-0BA0-4BE8-995E-ACB730AC84E3" ?><?define GuidDocs = "FE36FDA2-3E97-47B0-A422-C1AE72C8F420" ?>
   <?define GuidMenu = "A011CD1B-FF04-4D11-A596-BE6A2B5FA9FA" ?><?define GuidDesktop = "071DB026-15EB-4CB9-85C9-AB57E552ED20" ?><?define GuidRun = "0F5E83A3-638E-4BC1-919D-B304E378420B" ?><?define GuidShell = "B83E5C0A-C82D-44CC-8508-990CD5326ABD" ?>
+  <?define ExplorerPackage = "hopoUsers.Explorer.msix" ?><?define GuidMenuFiles = "F9FAB8C8-BCDD-41BE-9129-86EC813845B4" ?><?define GuidAssets = "E6AB429C-CED7-4BF4-83BB-A8EF465A7674" ?>
   <?endif ?>
-  <Package Name="$(var.AppName)" Manufacturer="hopo" Version="2.6.2" Language="1033" Scope="perUser" UpgradeCode="$(var.AppUpgrade)" Compressed="yes">
+  <Package Name="$(var.AppName)" Manufacturer="hopo" Version="2.6.3" Language="1033" Scope="perUser" UpgradeCode="$(var.AppUpgrade)" Compressed="yes">
     <MajorUpgrade DowngradeErrorMessage="A newer $(var.AppName) version is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
     <Icon Id="LantossIcon" SourceFile="$(var.ReleaseDir)\source\UI\Lantoss.ico" />
@@ -31,11 +33,25 @@
             <RemoveRegistryKey Root="HKCU" Key="$(var.DesktopKey)" Action="removeOnUninstall" />
             <RemoveRegistryKey Root="HKCU" Key="$(var.AppKey)" Action="removeOnUninstall" />
           </Component>
-          <!-- Only removes the Windows 11 menu package that hopo 2.3 and earlier registered; 2.4 uses the classic right-click entry. -->
+          <!-- Registers or removes this app's Windows 11 menu package, and removes the one hopo 2.3 and earlier registered. -->
           <Component Id="PackageCleanup" Guid="$(var.GuidRegister)">
             <RegistryValue Root="HKCU" Key="$(var.AppKey)" Name="PackageCleanup" Value="1" Type="integer" KeyPath="yes" />
             <File Id="RegisterPackageScript" Source="$(var.ReleaseDir)\app\RegisterPackage.ps1" />
           </Component>
+          <!-- The Windows 11 menu: the native command and this app's signed identity package, with its logos. -->
+          <Component Id="ExplorerMenuFiles" Guid="$(var.GuidMenuFiles)">
+            <RegistryValue Root="HKCU" Key="$(var.AppKey)" Name="ExplorerMenu" Value="1" Type="integer" KeyPath="yes" />
+            <File Id="ExplorerDll" Source="$(var.ReleaseDir)\app\LantossExplorer.dll" />
+            <File Id="ExplorerMsix" Source="$(var.ReleaseDir)\app\$(var.ExplorerPackage)" />
+          </Component>
+          <Directory Id="AssetsFolder" Name="Assets">
+            <Component Id="ExplorerAssets" Guid="$(var.GuidAssets)">
+              <RegistryValue Root="HKCU" Key="$(var.AppKey)" Name="ExplorerAssets" Value="1" Type="integer" KeyPath="yes" />
+              <File Id="ExplorerLogo" Source="$(var.ReleaseDir)\app\Assets\Logo.png" />
+              <File Id="ExplorerSmallLogo" Source="$(var.ReleaseDir)\app\Assets\SmallLogo.png" />
+              <RemoveFolder Id="RemoveExplorerAssets" On="uninstall" />
+            </Component>
+          </Directory>
           <Directory Id="DocumentsFolder" Name="Documentation">
             <Component Id="Documents" Guid="$(var.GuidDocs)">
               <RegistryValue Root="HKCU" Key="$(var.AppKey)" Name="Documentation" Value="1" Type="integer" KeyPath="yes" />
@@ -83,7 +99,7 @@
     <Feature Id="Core" Title="$(var.AppName)" Description="File transfer, shared folders, sync and the local browser server. Required." Level="1" AllowAbsent="no" ConfigurableDirectory="INSTALLFOLDER">
       <ComponentRef Id="Application" /><ComponentRef Id="PackageCleanup" /><ComponentRef Id="Documents" /><ComponentRef Id="StartMenu" />
     </Feature>
-    <Feature Id="Explorer" Title="Share in Explorer" Description="Adds Share with hopo to the right-click menu (on Windows 11, under Show more options)." Level="1"><ComponentRef Id="ExplorerSharing" /></Feature>
+    <Feature Id="Explorer" Title="Share in Explorer" Description="Adds Send with hopo to the right-click menu. On Windows 11 it is in the first menu: setup asks once for administrator approval to trust hopo's signature (choose No to keep it under Show more options)." Level="1"><ComponentRef Id="ExplorerSharing" /><ComponentRef Id="ExplorerMenuFiles" /><ComponentRef Id="ExplorerAssets" /></Feature>
     <Feature Id="Desktop" Title="Desktop shortcut" Description="Add a $(var.AppName) shortcut to your desktop." Level="2"><ComponentRef Id="DesktopShortcut" /></Feature>
     <Feature Id="Startup" Title="Launch at sign-in" Description="Launch $(var.AppName) in the tray when this Windows account signs in. Automatic server startup is enabled by default in the app." Level="2"><ComponentRef Id="SignInStartup" /></Feature>
     <ui:WixUI Id="WixUI_FeatureTree" />
@@ -95,10 +111,14 @@
     </UI>
     <CustomAction Id="LaunchApp" FileRef="AppExe" ExeCommand="" Return="asyncNoWait" Impersonate="yes" />
     <CustomAction Id="RemoveUserIntegration" FileRef="AppExe" ExeCommand="--uninstall-integration" Return="check" Impersonate="yes" />
-    <!-- Earlier versions keep their Windows 11 package registered across upgrades; remove it once the new app is in place. -->
+    <!-- Without the Explorer feature, a package left by an earlier version is removed. With it, the package is registered; declining trust keeps the classic entry and setup still finishes. -->
     <CustomAction Id="RemoveOldExplorerPackage" FileRef="AppExe" ExeCommand="--remove-explorer-package" Execute="deferred" Return="ignore" Impersonate="yes" />
+    <CustomAction Id="RegisterExplorerPackage" FileRef="AppExe" ExeCommand="--install-integration" Execute="deferred" Return="ignore" Impersonate="yes" />
+    <CustomAction Id="RemoveExplorerPackage" FileRef="AppExe" ExeCommand="--remove-explorer-package" Return="ignore" Impersonate="yes" />
     <InstallExecuteSequence>
-      <Custom Action="RemoveOldExplorerPackage" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="RemoveOldExplorerPackage" After="InstallFiles" Condition="NOT REMOVE AND &amp;Explorer &lt;&gt; 3 AND !Explorer &lt;&gt; 3" />
+      <Custom Action="RegisterExplorerPackage" After="RemoveOldExplorerPackage" Condition="&amp;Explorer = 3" />
+      <Custom Action="RemoveExplorerPackage" Before="RemoveFiles" Condition="&amp;Explorer = 2 AND !Explorer = 3 AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="RemoveUserIntegration" Before="RemoveFiles" Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
   </Package>

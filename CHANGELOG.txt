@@ -1,3 +1,10 @@
+2026-11-24 - hopo 2.6.3: Send with hopo in the first Windows 11 menu
+
+Windows 11: right-click files or folders and Send with hopo is in the first
+menu, with your paired PCs in its submenu. Setup asks once for administrator
+approval so Windows trusts hopo's own signature; choose No to keep it under
+Show more options. hopo Users and hopo Admin each have their own entry.
+
 2026-11-24 - hopo 2.6.2: smoother app, taskbar icon, send ring
 
 Windows: Home no longer lags. Its animations run at a steady 30 frames a second,

@@ -6,13 +6,18 @@ using Microsoft.Win32;
 
 namespace Lantoss.UI;
 
-/// <summary>Registers only Lantoss's signed sparse identity. No global Explorer settings are changed.</summary>
+/// <summary>Registers only hopo's signed sparse identity, one per app (hopo Users, hopo Admin), so "Send with hopo" is in the first Windows 11 menu. No global Explorer settings are changed.</summary>
 internal static class ExplorerPackage
 {
     public static bool Supported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
-    /// <summary>The Windows 11 menu package ships with the app. hopo 2.4 setups leave it out (it can only start Lantoss.exe), so the classic right-click entry is used and old packages are only removed.</summary>
-    public static bool Packaged => Supported && File.Exists(Path.Combine(AppDirectory, "Lantoss.Explorer.msix"));
-    private static string AppDirectory => Path.GetDirectoryName(DesktopRegistration.Executable(Environment.ProcessPath ?? ""))!;
+    private const string Version = "2.6.3";
+    private static string Executable => DesktopRegistration.Executable(Environment.ProcessPath ?? "");
+    private static bool Admin => DesktopRegistration.IsAdmin(Executable);
+    private static string Name => Admin ? "Lantoss.ExplorerIntegration.Admin" : "Lantoss.ExplorerIntegration";
+    private static string Package => Admin ? "hopoAdmin.Explorer.msix" : "hopoUsers.Explorer.msix";
+    /// <summary>The setup ships this app's signed package next to it (hopo 2.4 to 2.6.2 shipped none and used only the classic menu).</summary>
+    public static bool Packaged => Supported && File.Exists(Path.Combine(AppDirectory, Package));
+    private static string AppDirectory => Path.GetDirectoryName(Executable)!;
     private static X509Certificate2 Publisher()
     {
         using Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream("Lantoss.Explorer.Publisher")!;
@@ -85,9 +90,9 @@ internal static class ExplorerPackage
         using X509Certificate2 certificate = Publisher();
         if (!Trusted(certificate))
         {
-            if (!prompt || MessageBox.Show("The Windows 11 sharing menu needs hopo's signed identity package.\n\nThis development build uses the publisher “Lantoss Development”. Allow Windows to trust this publisher for app packages on this PC? Windows will ask for administrator approval.\n\nCertificate: " + certificate.Thumbprint + "\n\nChoose No to cancel this feature. You can install without the Explorer feature.",
+            if (!prompt || MessageBox.Show("To show Send with hopo in the first Windows 11 right-click menu, Windows must trust hopo's own signature (publisher “Lantoss Development”) for app packages on this PC. Windows will ask for administrator approval once.\n\nCertificate: " + certificate.Thumbprint + "\n\nChoose No to keep Share with hopo under Show more options.",
                 "hopo · Windows 11 sharing menu", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-                throw new OperationCanceledException("The Windows 11 menu was not installed. Install again with Explorer sharing unchecked to use the app without it.");
+                throw new OperationCanceledException("Share with hopo stays under Show more options.");
             ProcessStartInfo trust = new(Environment.ProcessPath!, "--trust-explorer-publisher")
             {
                 UseShellExecute = true,
@@ -100,16 +105,16 @@ internal static class ExplorerPackage
                 throw new IOException("Publisher setup was not approved. The Windows 11 menu has not been registered.");
         }
         Run("Install");
-        using RegistryKey settings = Registry.CurrentUser.CreateSubKey(DesktopRegistration.SettingsKey);
+        using RegistryKey settings = Registry.CurrentUser.CreateSubKey(DesktopRegistration.SettingsKeyFor(Executable));
         settings.SetValue("ModernLocation", AppDirectory);
-        settings.SetValue("ModernVersion", "1.9.0");
+        settings.SetValue("ModernVersion", Version);
     }
     public static bool InstalledHere
     {
         get
         {
-            using RegistryKey? settings = Registry.CurrentUser.OpenSubKey(DesktopRegistration.SettingsKey);
-            return settings?.GetValue("ModernVersion") as string == "1.9.0" && string.Equals(settings.GetValue("ModernLocation") as string, AppDirectory, StringComparison.OrdinalIgnoreCase);
+            using RegistryKey? settings = Registry.CurrentUser.OpenSubKey(DesktopRegistration.SettingsKeyFor(Executable));
+            return settings?.GetValue("ModernVersion") as string == Version && string.Equals(settings.GetValue("ModernLocation") as string, AppDirectory, StringComparison.OrdinalIgnoreCase);
         }
     }
     public static void Remove()
@@ -117,10 +122,10 @@ internal static class ExplorerPackage
         if (!Supported)
             return;
         Run("Remove");
-        using RegistryKey? settings = Registry.CurrentUser.OpenSubKey(DesktopRegistration.SettingsKey, true);
+        using RegistryKey? settings = Registry.CurrentUser.OpenSubKey(DesktopRegistration.SettingsKeyFor(Executable), true);
         settings?.DeleteValue("ModernLocation", false);
         settings?.DeleteValue("ModernVersion", false);
-        // Keep publisher trust: another installed Lantoss version may still use it. Never remove unrelated trust.
+        // Keep publisher trust: the other hopo app may still use it. Never remove unrelated trust.
     }
     private static void Run(string mode)
     {
@@ -138,7 +143,7 @@ internal static class ExplorerPackage
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        foreach (string argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-Mode", mode, "-AppDirectory", AppDirectory })
+        foreach (string argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-Mode", mode, "-AppDirectory", AppDirectory, "-Name", Name, "-Package", Package })
             start.ArgumentList.Add(argument);
         using Process process = Process.Start(start) ?? throw new IOException("Windows package setup could not start.");
         Task<string> output = process.StandardOutput.ReadToEndAsync(), error = process.StandardError.ReadToEndAsync();

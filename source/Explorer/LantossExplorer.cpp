@@ -16,11 +16,13 @@
 #include <algorithm>
 #include <new>
 
-static const CLSID CommandId = {0x18f23026,0x095d,0x4fd5,{0xae,0xf4,0x7d,0xdf,0x06,0x84,0x7d,0xe9}};
+// One COM class per app, so hopo Users and hopo Admin can both be installed; the class Explorer asks for picks the app.
+static const CLSID UsersId = {0x18f23026,0x095d,0x4fd5,{0xae,0xf4,0x7d,0xdf,0x06,0x84,0x7d,0xe9}};
+static const CLSID AdminId = {0xe490b416,0xb223,0x4faa,{0x84,0x4c,0x06,0x92,0x23,0xd2,0xf7,0x3f}};
 static HMODULE module;
 static LONG objects, locks;
 struct Target { std::wstring name, key; };
-static constexpr wchar_t Settings[] = L"Software\\Lantoss\\Desktop";
+[[maybe_unused]] static std::wstring Settings(bool admin) { return admin ? L"Software\\Lantoss\\AdminDesktop" : L"Software\\Lantoss\\Desktop"; }
 #ifdef LANTOSS_EXPLORER_TEST
 static std::wstring testRequest, testExecutable;
 static std::vector<Target> testTargets;
@@ -31,21 +33,21 @@ static bool HexKey(const std::wstring& key) {
         return (c >= L'0' && c <= L'9') || (c >= L'A' && c <= L'F') || (c >= L'a' && c <= L'f');
     });
 }
-static bool Enabled() {
+static bool Enabled([[maybe_unused]] bool admin) {
 #ifdef LANTOSS_EXPLORER_TEST
     return true;
 #else
     DWORD value = 0, size = sizeof(value);
-    return RegGetValueW(HKEY_CURRENT_USER, Settings, L"ExplorerEnabled", RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS && value == 1;
+    return RegGetValueW(HKEY_CURRENT_USER, Settings(admin).c_str(), L"ExplorerEnabled", RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS && value == 1;
 #endif
 }
-static std::vector<Target> Targets() {
+static std::vector<Target> Targets([[maybe_unused]] bool admin) {
 #ifdef LANTOSS_EXPLORER_TEST
     return testTargets;
 #else
     std::vector<Target> result;
     HKEY peers;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Lantoss\\Desktop\\Peers", 0, KEY_READ, &peers) != ERROR_SUCCESS) return result;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, (Settings(admin) + L"\\Peers").c_str(), 0, KEY_READ, &peers) != ERROR_SUCCESS) return result;
     for (DWORD i = 0; i < 32; ++i) {
         wchar_t key[65]{}; DWORD length = 65;
         if (RegEnumKeyExW(peers, i, key, &length, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
@@ -61,7 +63,7 @@ static std::vector<Target> Targets() {
     return result;
 #endif
 }
-static std::wstring Executable() {
+static std::wstring Executable([[maybe_unused]] bool admin) {
 #ifdef LANTOSS_EXPLORER_TEST
     return testExecutable;
 #else
@@ -69,7 +71,7 @@ static std::wstring Executable() {
     if (!count || count >= 32768) return {};
     std::wstring result(path, count);
     auto slash = result.find_last_of(L"\\/");
-    return slash == std::wstring::npos ? L"" : result.substr(0, slash + 1) + L"hopoUsers.exe";
+    return slash == std::wstring::npos ? L"" : result.substr(0, slash + 1) + (admin ? L"hopoAdmin.exe" : L"hopoUsers.exe");
 #endif
 }
 static HRESULT Selection(IShellItemArray* items, std::vector<std::wstring>& paths) {
@@ -109,12 +111,12 @@ static HRESULT RequestPath(std::wstring& path) {
     path = root + L"\\" + std::wstring(guid + 1, 36) + L".req"; return S_OK;
 #endif
 }
-static HRESULT Launch(IShellItemArray* items, const std::wstring& key) {
+static HRESULT Launch(IShellItemArray* items, const std::wstring& key, bool admin) {
     try {
         std::vector<std::wstring> paths; HRESULT hr = Selection(items, paths); if (FAILED(hr)) return hr;
         if (!key.empty() && !HexKey(key)) return E_INVALIDARG;
         std::wstring request; hr = RequestPath(request); if (FAILED(hr)) return hr;
-        std::wstring exe = Executable(); if (exe.empty()) return E_FAIL;
+        std::wstring exe = Executable(admin); if (exe.empty()) return E_FAIL;
         // Binary length-prefixed UTF-16 avoids command-line limits and quoting ambiguities.
         HANDLE file = CreateFileW(request.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
@@ -141,9 +143,9 @@ static HRESULT Launch(IShellItemArray* items, const std::wstring& key) {
 
 class Command;
 class Enumeration final : public IEnumExplorerCommand {
-    LONG refs = 1; std::vector<Target> targets; size_t position = 0;
+    LONG refs = 1; std::vector<Target> targets; size_t position = 0; bool admin;
 public:
-    explicit Enumeration(std::vector<Target> items, size_t at = 0) : targets(std::move(items)), position(at) { InterlockedIncrement(&objects); }
+    explicit Enumeration(std::vector<Target> items, bool forAdmin, size_t at = 0) : targets(std::move(items)), position(at), admin(forAdmin) { InterlockedIncrement(&objects); }
     ~Enumeration() { InterlockedDecrement(&objects); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
         if (!out) return E_POINTER;
@@ -158,13 +160,13 @@ public:
     HRESULT STDMETHODCALLTYPE Clone(IEnumExplorerCommand** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
-        try { *out = new Enumeration(targets, position); return S_OK; } catch (...) { return E_OUTOFMEMORY; }
+        try { *out = new Enumeration(targets, admin, position); return S_OK; } catch (...) { return E_OUTOFMEMORY; }
     }
 };
 class Command final : public IExplorerCommand {
-    LONG refs = 1; bool root; Target target;
+    LONG refs = 1; bool admin, root; Target target;
 public:
-    explicit Command(bool parent = true, Target item = {}) : root(parent), target(std::move(item)) { InterlockedIncrement(&objects); }
+    explicit Command(bool forAdmin, bool parent = true, Target item = {}) : admin(forAdmin), root(parent), target(std::move(item)) { InterlockedIncrement(&objects); }
     ~Command() { InterlockedDecrement(&objects); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
         if (!out) return E_POINTER;
@@ -173,12 +175,12 @@ public:
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
     ULONG STDMETHODCALLTYPE Release() override { ULONG left = InterlockedDecrement(&refs); if (!left) delete this; return left; }
-    HRESULT STDMETHODCALLTYPE GetTitle(IShellItemArray*, PWSTR* out) override { return SHStrDupW(root ? L"Share with Lantoss" : target.name.c_str(), out); }
-    HRESULT STDMETHODCALLTYPE GetIcon(IShellItemArray*, PWSTR* out) override { if (!out) return E_POINTER; *out = nullptr; try { return SHStrDupW((Executable() + L",0").c_str(), out); } catch (...) { return E_OUTOFMEMORY; } }
+    HRESULT STDMETHODCALLTYPE GetTitle(IShellItemArray*, PWSTR* out) override { return SHStrDupW(root ? (admin ? L"Send with hopo Admin" : L"Send with hopo") : target.name.c_str(), out); }
+    HRESULT STDMETHODCALLTYPE GetIcon(IShellItemArray*, PWSTR* out) override { if (!out) return E_POINTER; *out = nullptr; try { return SHStrDupW((Executable(admin) + L",0").c_str(), out); } catch (...) { return E_OUTOFMEMORY; } }
     HRESULT STDMETHODCALLTYPE GetToolTip(IShellItemArray*, PWSTR* out) override { if (!out) return E_POINTER; *out = nullptr; return E_NOTIMPL; }
     HRESULT STDMETHODCALLTYPE GetCanonicalName(GUID* out) override {
         if (!out) return E_POINTER;
-        *out = CommandId;
+        *out = admin ? AdminId : UsersId;
         // Give each child a stable identity without persisting a device address in Explorer.
         if (!root && target.key.empty()) out->Data1 ^= 1;
         else if (!root && HexKey(target.key)) {
@@ -191,7 +193,7 @@ public:
     HRESULT STDMETHODCALLTYPE GetState(IShellItemArray* items, BOOL, EXPCMDSTATE* state) override {
         if (!state) return E_POINTER;
         *state = ECS_HIDDEN;
-        if (!Enabled()) return S_OK;
+        if (!Enabled(admin)) return S_OK;
         DWORD count = 0;
         if (items && SUCCEEDED(items->GetCount(&count)) && count > 0 && count <= 256) {
             SFGAOF attributes = 0;
@@ -199,13 +201,13 @@ public:
         }
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE Invoke(IShellItemArray* items, IBindCtx*) override { return Enabled() ? Launch(items, target.key) : E_ACCESSDENIED; }
+    HRESULT STDMETHODCALLTYPE Invoke(IShellItemArray* items, IBindCtx*) override { return Enabled(admin) ? Launch(items, target.key, admin) : E_ACCESSDENIED; }
     HRESULT STDMETHODCALLTYPE GetFlags(EXPCMDFLAGS* out) override { if (!out) return E_POINTER; *out = root ? ECF_HASSUBCOMMANDS : ECF_DEFAULT; return S_OK; }
     HRESULT STDMETHODCALLTYPE EnumSubCommands(IEnumExplorerCommand** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
         if (!root) return E_NOTIMPL;
-        try { auto targets = Targets(); targets.insert(targets.begin(), {L"Choose a PC...", L""}); *out = new Enumeration(std::move(targets)); return S_OK; } catch (...) { return E_OUTOFMEMORY; }
+        try { auto targets = Targets(admin); targets.insert(targets.begin(), {L"Choose a device\u2026", L""}); *out = new Enumeration(std::move(targets), admin); return S_OK; } catch (...) { return E_OUTOFMEMORY; }
     }
 };
 HRESULT Enumeration::Next(ULONG count, IExplorerCommand** commands, ULONG* fetched) {
@@ -213,15 +215,15 @@ HRESULT Enumeration::Next(ULONG count, IExplorerCommand** commands, ULONG* fetch
     if (fetched) *fetched = 0;
     ULONG copied = 0;
     try {
-        while (copied < count && position < targets.size()) { commands[copied++] = new Command(false, targets[position++]); }
+        while (copied < count && position < targets.size()) { commands[copied++] = new Command(admin, false, targets[position++]); }
     } catch (...) { for (ULONG i = 0; i < copied; ++i) { commands[i]->Release(); commands[i] = nullptr; } return E_OUTOFMEMORY; }
     if (fetched) *fetched = copied;
     return copied == count ? S_OK : S_FALSE;
 }
 class Factory final : public IClassFactory {
-    LONG refs = 1;
+    LONG refs = 1; bool admin;
 public:
-    Factory() { InterlockedIncrement(&objects); } ~Factory() { InterlockedDecrement(&objects); }
+    explicit Factory(bool forAdmin) : admin(forAdmin) { InterlockedIncrement(&objects); } ~Factory() { InterlockedDecrement(&objects); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override { if (!out) return E_POINTER; *out = nullptr; if (iid == IID_IUnknown || iid == IID_IClassFactory) { *out = static_cast<IClassFactory*>(this); AddRef(); return S_OK; } return E_NOINTERFACE; }
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
     ULONG STDMETHODCALLTYPE Release() override { ULONG left = InterlockedDecrement(&refs); if (!left) delete this; return left; }
@@ -229,7 +231,7 @@ public:
         if (!out) return E_POINTER;
         *out = nullptr;
         if (outer) return CLASS_E_NOAGGREGATION;
-        Command* command = new(std::nothrow) Command; if (!command) return E_OUTOFMEMORY;
+        Command* command = new(std::nothrow) Command(admin); if (!command) return E_OUTOFMEMORY;
         HRESULT hr = command->QueryInterface(iid, out); command->Release(); return hr;
     }
     HRESULT STDMETHODCALLTYPE LockServer(BOOL lock) override { if (lock) InterlockedIncrement(&locks); else InterlockedDecrement(&locks); return S_OK; }
@@ -237,8 +239,8 @@ public:
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID iid, void** out) {
     if (!out) return E_POINTER;
     *out = nullptr;
-    if (clsid != CommandId) return CLASS_E_CLASSNOTAVAILABLE;
-    Factory* factory = new(std::nothrow) Factory; if (!factory) return E_OUTOFMEMORY;
+    if (clsid != UsersId && clsid != AdminId) return CLASS_E_CLASSNOTAVAILABLE;
+    Factory* factory = new(std::nothrow) Factory(clsid == AdminId); if (!factory) return E_OUTOFMEMORY;
     HRESULT hr = factory->QueryInterface(iid, out); factory->Release(); return hr;
 }
 extern "C" HRESULT __stdcall DllCanUnloadNow() { return objects == 0 && locks == 0 ? S_OK : S_FALSE; }
