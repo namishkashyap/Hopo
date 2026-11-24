@@ -19,6 +19,96 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App>
     }
     private const string Channel = "hopo";
     private WifiManager.MulticastLock? multicast;
+    private PowerManager.WakeLock? awake;
+    private WifiManager.WifiLock? fastWifi;
+    private static readonly Dictionary<int, Action<int>> replies = [];
+    private static int nextRequest;
+    /// <summary>
+    /// An incoming transfer as a notification with Decline, Accept and (for a paired PC) Always accept, which work without opening hopo.
+    /// Returns what removes the notification once the transfer is answered in the app or here.
+    /// </summary>
+    public Action Incoming(Lantoss.Core.ReceiveRequest request, Action<int> answer)
+    {
+        int id;
+        lock (replies)
+        {
+            id = ++nextRequest;
+            replies[id] = answer;
+        }
+        void Dismiss()
+        {
+            lock (replies)
+                replies.Remove(id);
+            (GetSystemService(NotificationService) as NotificationManager)?.Cancel(Tag, id);
+        }
+        if (GetSystemService(NotificationService) is not NotificationManager manager)
+            return Dismiss;
+        PendingIntent Reply(int choice)
+        {
+            Intent intent = new(this, typeof(ReplyReceiver));
+            intent.PutExtra(ReplyReceiver.Request, id);
+            intent.PutExtra(ReplyReceiver.Choice, choice);
+            return PendingIntent.GetBroadcast(this, id * 4 + choice, intent, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent)!;
+        }
+        Intent open = new(this, typeof(MainActivity));
+        open.SetFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
+        string text = $"{request.Manifest.FileCount} {(request.Manifest.FileCount == 1 ? "file" : "files")} · {Lantoss.Core.Format.Bytes(request.Manifest.TotalBytes)}";
+        Notification.Builder builder = new Notification.Builder(this, Channel)
+            .SetContentTitle(request.PeerName + " wants to send you files")
+            .SetContentText(text)
+            .SetSmallIcon(Resource.Drawable.icon)
+            .SetCategory(Notification.CategoryMessage)
+            .SetOngoing(true)
+            .SetContentIntent(PendingIntent.GetActivity(this, id * 4 + 3, open, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent))
+            .AddAction(new Notification.Action.Builder(null, "Decline", Reply(0)).Build())
+            .AddAction(new Notification.Action.Builder(null, "Accept", Reply(1)).Build());
+        if (!request.Browser && request.Fingerprint.Length > 0)
+            builder.AddAction(new Notification.Action.Builder(null, "Always accept", Reply(2)).Build());
+        manager.Notify(Tag, id, builder.Build()!);
+        return Dismiss;
+    }
+    private const string Tag = "hopo-incoming";
+    /// <summary>A button on an incoming-files notification was tapped.</summary>
+    public static void Answer(int id, int choice)
+    {
+        Action<int>? answer;
+        lock (replies)
+            replies.Remove(id, out answer);
+        (Current?.GetSystemService(NotificationService) as NotificationManager)?.Cancel(Tag, id);
+        answer?.Invoke(choice);
+    }
+    /// <summary>
+    /// While files move, the processor and Wi-Fi stay awake: otherwise Android slows both when the screen is off or hopo is in the
+    /// background, and transfers crawl. Released as soon as no transfer is running.
+    /// </summary>
+    public void KeepAwake(bool on)
+    {
+        lock (replies)
+        {
+            if (on)
+            {
+                if (awake == null && GetSystemService(PowerService) is PowerManager power)
+                {
+                    awake = power.NewWakeLock(WakeLockFlags.Partial, "hopo:transfer");
+                    awake!.SetReferenceCounted(false);
+                    awake.Acquire(TimeSpan.FromHours(2).Ticks / TimeSpan.TicksPerMillisecond);
+                }
+                if (fastWifi == null && GetSystemService(WifiService) is WifiManager wifi)
+                {
+                    fastWifi = wifi.CreateWifiLock(Build.VERSION.SdkInt >= BuildVersionCodes.Q ? global::Android.Net.WifiMode.FullLowLatency : global::Android.Net.WifiMode.FullHighPerf, "hopo transfer");
+                    fastWifi!.SetReferenceCounted(false);
+                    fastWifi.Acquire();
+                }
+                return;
+            }
+            if (awake is { IsHeld: true })
+                awake.Release();
+            awake = null;
+            if (fastWifi is { IsHeld: true })
+                fastWifi.Release();
+            fastWifi = null;
+        }
+    }
     public AndroidApp(IntPtr handle, JniHandleOwnership ownership) : base(handle, ownership) { }
     public override void OnCreate()
     {

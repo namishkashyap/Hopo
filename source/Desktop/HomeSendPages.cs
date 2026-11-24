@@ -109,14 +109,17 @@ internal sealed class HomePage : IPage
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new(0, 0, 0, 6)
         };
-        TextBlock name = C.Text(app.Store.Preferences.DeviceName, 14, bold: true), kind = C.Text("This " + Shell.Platform, 11, "Muted");
+        // The ring is scaled down to fit a phone, so the names are drawn larger there to stay readable.
+        bool phone = OperatingSystem.IsAndroid();
+        double core = phone ? 200 : 150;
+        TextBlock name = C.Text(app.Store.Preferences.DeviceName, phone ? 22 : 14, bold: true), kind = C.Text("This " + Shell.Platform, phone ? 16 : 11, "Muted");
         name.TextWrapping = TextWrapping.NoWrap;
         name.TextTrimming = TextTrimming.CharacterEllipsis;
-        name.MaxWidth = 122;
+        name.MaxWidth = core - 28;
         name.HorizontalAlignment = kind.HorizontalAlignment = HorizontalAlignment.Center;
         StackPanel label = C.Stack(glow, name, C.Space(kind, 0, 2));
         label.VerticalAlignment = VerticalAlignment.Center;
-        stage.Children.Add(Place(new Border { Width = 150, Height = 150, CornerRadius = new(75), Background = Theme.Brush("Glass"), BorderBrush = Theme.Brush("Text/18"), BorderThickness = new(1), BoxShadow = new BoxShadows(new BoxShadow { Blur = 60, Color = Theme.Color(Theme.Dark ? "GlowA/35" : "GlowA/25") }), Child = label, IsHitTestVisible = false }, Middle - 75, Middle - 75));
+        stage.Children.Add(Place(new Border { Width = core, Height = core, CornerRadius = new(core / 2), Background = Theme.Brush("Glass"), BorderBrush = Theme.Brush("Text/18"), BorderThickness = new(1), BoxShadow = new BoxShadows(new BoxShadow { Blur = 60, Color = Theme.Color(Theme.Dark ? "GlowA/35" : "GlowA/25") }), Child = label, IsHitTestVisible = false }, Middle - core / 2, Middle - core / 2));
         stage.Children.Add(devices);
         foreach ((string key, string text, string icon) in new[] { ("send", "Send files", "send"), ("folder", "Folder", "folder"), ("text", "Text", "text"), ("phone", "Phone", "phone") })
         {
@@ -311,16 +314,16 @@ internal sealed class HomePage : IPage
         AutomationProperties.SetName(blip, spot.Name + (spot.Browser != null ? ", through the browser" : ", on your network"));
         Border tag = new()
         {
-            Child = C.Medium(spot.Name, 12),
-            Padding = new(9, 5),
-            CornerRadius = new(9),
-            MaxWidth = 180,
+            Child = C.Medium(spot.Name, OperatingSystem.IsAndroid() ? 19 : 12),
+            Padding = OperatingSystem.IsAndroid() ? new(12, 7) : new(9, 5),
+            CornerRadius = new(OperatingSystem.IsAndroid() ? 12 : 9),
+            MaxWidth = OperatingSystem.IsAndroid() ? 240 : 180,
             Background = Theme.Brush(Theme.Dark ? "#0A0A12/50" : "Glass"),
             BorderBrush = Theme.Brush("GlassBorder"),
             BorderThickness = new(1),
             IsHitTestVisible = false
         };
-        Canvas.SetTop(tag, y - 14);
+        Canvas.SetTop(tag, y - (OperatingSystem.IsAndroid() ? 20 : 14));
         if (right)
             Canvas.SetLeft(tag, x + 18);
         else

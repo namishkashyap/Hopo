@@ -290,6 +290,9 @@ internal sealed class Dialogs(Shell app)
                     CheckSpace();
                 });
                 choose.IsEnabled = !request.FixedFolder;
+                // A paired PC can be trusted here: its next transfers arrive without asking.
+                Button always = C.Button("Always accept from " + request.PeerName, () => { Trust(request); window.Close(true); }, icon: "check");
+                always.IsVisible = !request.Browser && !request.FixedFolder && request.Fingerprint.Length > 0 && app.Store.Trusted(request.Fingerprint) != null;
                 choose.IsVisible = !OperatingSystem.IsAndroid();
                 StackPanel names = C.Stack();
                 foreach (ManifestEntry entry in request.Manifest.Entries.Take(8))
@@ -309,14 +312,50 @@ internal sealed class Dialogs(Shell app)
                     C.Space(C.Badge(request.Browser ? "Phone/browser · " + (app.Engine.Browser.Https ? "HTTPS" : "local HTTP") : request.KeyVerified ? "Paired device · public key verified" : "Connected device · saved public key", "Success", "SuccessSoft"), 16),
                     C.Text("SAVE TO", 10, "Muted", true), C.Space(location, 10, 7), C.Space(choose, 10), C.Space(free, 18), C.Text("IF FILES ALREADY EXIST", 10, "Muted", true), duplicates,
                     C.Space(C.Text(request.FixedFolder ? "Files are saved into this shared folder and become visible to its connected devices. Existing files are kept." : request.Browser ? "Browser uploads keep both copies. Files are saved atomically and never opened or shared automatically." + (app.Engine.Browser.Https ? "" : " Local HTTP is not encrypted.") : "Files are checksum-verified before saving. Received files are never opened or shared automatically.", 11, "Muted"), 20),
-                    C.Inline(C.Button("Decline", () => window.Close(false)), accept)));
+                    Actions(C.Button("Decline", () => window.Close(false)), accept, always)));
                 CheckSpace();
+#if ANDROID
+                // The same choice from the notification, whether or not hopo is open; whichever answers first closes both.
+                Action? dismiss = Shell.IncomingHook?.Invoke(request, choice => Dispatcher.UIThread.Post(() =>
+                {
+                    if (!window.IsVisible)
+                        return;
+                    if (choice == 2)
+                        Trust(request);
+                    window.Close(choice > 0);
+                }));
+                window.Closed += (_, _) => dismiss?.Invoke();
+#endif
                 using CancellationTokenRegistration cancel = token.Register(() => Dispatcher.UIThread.Post(() => window.Close(false)));
                 bool accepted = await ShowAsync<bool?>(window) == true;
                 return new ReceiveDecision(accepted && !token.IsCancellationRequested, folder, (DuplicatePolicy)duplicates.SelectedIndex);
             });
         }
         finally { approvals.Release(); }
+    }
+    /// <summary>Marks the sending PC as trusted: hopo accepts its files without asking from now on (undo on Devices).</summary>
+    private void Trust(ReceiveRequest request)
+    {
+        if (app.Store.Trusted(request.Fingerprint) is not Peer peer)
+            return;
+        app.Engine.EditPeer(peer with
+        {
+            Trusted = true
+        });
+        app.Tell(peer.Name + " is trusted: its files arrive without asking. Change this on Devices.");
+    }
+    /// <summary>Dialog buttons side by side, wrapping onto a new line on a phone.</summary>
+    private static Panel Actions(params Control[] buttons)
+    {
+        if (!OperatingSystem.IsAndroid())
+            return C.Inline(buttons);
+        WrapPanel wrap = new();
+        foreach (Control button in buttons)
+        {
+            button.Margin = new(0, 0, 8, 8);
+            wrap.Children.Add(button);
+        }
+        return wrap;
     }
     public async Task<bool> SyncAsync(SyncApproval request, CancellationToken token)
     {
