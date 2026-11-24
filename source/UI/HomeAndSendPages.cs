@@ -12,14 +12,10 @@ internal sealed class HomePage : IPage
 {
     // The nearby field is drawn on the design's fixed 640 px stage and scaled down on small windows.
     private const double Stage = 640, Middle = Stage / 2;
-    // Ten wave rings (the design's seven plus amber, sky blue and coral): radius, wave height, lobes, colour, spin seconds, reversed, morph seconds, pointer pull.
-    // Spin is 1.5× and morph 1.6× the design's timing, for a calmer field.
-    private static readonly (double R, double A, int N, string Color, double Spin, bool Reverse, double Morph, double Pull)[] Rings = [(268, 9, 14, "#B57CFF", 135, false, 11.2, 14), (273, 10, 18, "#3FE0FF", 195, true, 14.4, 8), (277, 8, 22, "#3DF5A0", 165, false, 9.6, 12), (282, 11, 12, "#FF6AD5", 240, true, 16, 6), (290, 9, 16, "#D49BFF", 285, true, 15.2, 9), (284, 10, 20, "#5CF0D0", 262.5, false, 13.6, 10), (299, 5, 28, "#A7B6FF", 360, true, 12, 15), (271, 7, 16, "#F5B54A", 210, true, 12.8, 11), (287, 8, 24, "#6FB7FF", 300, false, 10.4, 7), (294, 7, 13, "#FF8A80", 225, true, 14.8, 12)];
     private static readonly KeySpline Settle = Frozen(new KeySpline(0.22, 1, 0.36, 1));
     private readonly AppShell app;
     private readonly Canvas stage = new() { Width = Stage, Height = Stage }, devices = new() { Width = Stage, Height = Stage };
-    private readonly System.Windows.Shapes.Path[] lines = new System.Windows.Shapes.Path[Rings.Length], glows = new System.Windows.Shapes.Path[Rings.Length], halos = new System.Windows.Shapes.Path[Rings.Length];
-    private readonly Point[] samples = new Point[180];
+    private readonly WaveRings waves = new(Stage);
     // The floating "Waiting for approval" card: bottom right of Home, above the dock line, only while a phone or browser waits.
     private readonly Border pending = new() { Width = 360, Padding = new(16), CornerRadius = new(18), BorderThickness = new(1) };
     private readonly Grid pendingFrame;
@@ -31,7 +27,9 @@ internal sealed class HomePage : IPage
     private string shownDevices = "", shownWaiting = "";
     private readonly Border sheetHost = new() { HorizontalAlignment = HorizontalAlignment.Center, Margin = new(0, 0, 0, 12) }, clickAway = new() { Background = Brushes.Transparent, Visibility = Visibility.Collapsed };
     private readonly Dictionary<string, Button> dock = [];
-    private readonly TextBlock status = C.Text("", 12, "Muted");
+    private readonly Border speedCard = new() { Width = 260, Padding = new(14, 11, 14, 11), CornerRadius = new(16), BorderThickness = new(1) };
+    private readonly TextBlock speedTitle = C.Text("", 13, bold: true), speedDetail = C.Text("", 12, "Muted");
+    private readonly Grid speedFrame;
     private string? sheet, target, folder;
     private string draft = "";
     private bool upload = true;
@@ -43,44 +41,8 @@ internal sealed class HomePage : IPage
     public HomePage(AppShell app)
     {
         this.app = app;
-        Canvas glowLayer = new()
-        {
-            Width = Stage,
-            Height = Stage,
-            IsHitTestVisible = false
-        }, lineLayer = new()
-        {
-            Width = Stage,
-            Height = Stage,
-            IsHitTestVisible = false
-        };
-        for (int i = 0; i < Rings.Length; i++)
-        {
-            SolidColorBrush ink = new((Color)ColorConverter.ConvertFromString(Rings[i].Color));
-            ink.Freeze();
-            // The glow is two wide, faint copies of the line (12 px and 4 px) rather than a blur, which would redraw every frame.
-            (halos[i], glows[i], lines[i]) = (new()
-            {
-                Stroke = ink,
-                StrokeThickness = 12,
-                StrokeLineJoin = PenLineJoin.Round
-            }, new()
-            {
-                Stroke = ink,
-                StrokeThickness = 4,
-                StrokeLineJoin = PenLineJoin.Round
-            }, new()
-            {
-                Stroke = ink,
-                StrokeThickness = 0.5,
-                StrokeLineJoin = PenLineJoin.Round
-            });
-            glowLayer.Children.Add(halos[i]);
-            glowLayer.Children.Add(glows[i]);
-            lineLayer.Children.Add(lines[i]);
-        }
-        stage.Children.Add(glowLayer);
-        stage.Children.Add(lineLayer);
+        stage.Children.Add(waves.Glow);
+        stage.Children.Add(waves.Lines);
         foreach (double size in new[] { 470.0, 340 })
         {
             Ellipse ring = new()
@@ -193,7 +155,6 @@ internal sealed class HomePage : IPage
         }
         Border bar = C.Card(buttons, 8);
         bar.CornerRadius = new(18);
-        status.HorizontalAlignment = HorizontalAlignment.Center;
         StackPanel bottom = new()
         {
             VerticalAlignment = VerticalAlignment.Bottom,
@@ -202,7 +163,6 @@ internal sealed class HomePage : IPage
         };
         bottom.Children.Add(sheetHost);
         bottom.Children.Add(C.Shadow(bar, 18, 60, 24, 0.45));
-        bottom.Children.Add(C.Space(status, 0, 8));
         Grid field = new()
         {
             Background = Brushes.Transparent,
@@ -235,6 +195,21 @@ internal sealed class HomePage : IPage
         pendingFrame.Margin = new(0, 0, 24, 104);
         pendingFrame.Visibility = Visibility.Collapsed;
         layout.Children.Add(pendingFrame);
+        // Transfer speed floats at the bottom left with a fixed size, so the dock and rings never move when it appears or changes.
+        speedCard.SetResourceReference(Border.BackgroundProperty, "Surface");
+        speedCard.SetResourceReference(Border.BorderBrushProperty, "GlassEdge");
+        StackPanel speedText = C.Stack(C.Space(speedTitle, 2), speedDetail);
+        speedText.Margin = new(12, 0, 0, 0);
+        speedText.Width = 200;
+        speedCard.Child = C.Inline(C.Icon("transfer", 18, "Accent"), speedText);
+        speedTitle.TextTrimming = speedDetail.TextTrimming = TextTrimming.CharacterEllipsis;
+        AutomationProperties.SetName(speedCard, "Transfer in progress");
+        speedFrame = C.Shadow(speedCard, 16, 40, 14, 0.4);
+        speedFrame.HorizontalAlignment = HorizontalAlignment.Left;
+        speedFrame.VerticalAlignment = VerticalAlignment.Bottom;
+        speedFrame.Margin = new(24, 0, 0, 104);
+        speedFrame.Visibility = Visibility.Collapsed;
+        layout.Children.Add(speedFrame);
         // Dropping files anywhere on Home adds them to the selection and opens the Send panel.
         AutomationProperties.SetName(layout, "Drop files or folders to prepare a transfer");
         layout.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
@@ -308,42 +283,7 @@ internal sealed class HomePage : IPage
         last = now;
         Draw();
     }
-    /// <summary>Each ring spins, morphs through the design's three shapes (A, 1.35 A, .5 A with shifted phase) and shimmers between .55 and 1.</summary>
-    private void Draw()
-    {
-        for (int i = 0; i < Rings.Length; i++)
-        {
-            (double R, double A, int N, string _, double Spin, bool Reverse, double Morph, double Pull) = Rings[i];
-            double p = i * 0.7, spin = (Reverse ? -2 : 2) * Math.PI * clock / Spin, u = clock / Morph % 1 * 3;
-            int k = (int)u;
-            double ease = Bezier.Wave.Ease(u - k);
-            (double A, double Phase)[] shapes = [(A, p), (A * 1.35, p + Math.PI * 0.66), (A * 0.5, p + Math.PI * 1.33), (A, p)];
-            double height = shapes[k].A + (shapes[k + 1].A - shapes[k].A) * ease, phase = shapes[k].Phase + (shapes[k + 1].Phase - shapes[k].Phase) * ease;
-            double scale = 1 + proximity * Pull * (i % 3 == 1 ? -1 : 1) * 0.0045, half = Math.Floor(N / 2.0 + 0.5);
-            for (int step = 0; step < samples.Length; step++)
-            {
-                double t = step * Math.PI / 90, r = (R + height * Math.Sin(N * t + phase) + height * 0.35 * Math.Sin(half * t - phase * 1.3)) * scale;
-                samples[step] = new(Middle + r * Math.Cos(t + spin), Middle + r * Math.Sin(t + spin));
-            }
-            // Smooth curves through the samples (Catmull-Rom as cubic Béziers), so the ring has no corners between points.
-            StreamGeometry geometry = new();
-            using (StreamGeometryContext path = geometry.Open())
-            {
-                int n = samples.Length;
-                path.BeginFigure(samples[0], false, true);
-                for (int j = 0; j < n; j++)
-                {
-                    Point a = samples[(j + n - 1) % n], b = samples[j], c = samples[(j + 1) % n], d = samples[(j + 2) % n];
-                    path.BezierTo(b + (c - a) / 6, c - (d - b) / 6, c, true, true);
-                }
-            }
-            geometry.Freeze();
-            lines[i].Data = glows[i].Data = halos[i].Data = geometry;
-            lines[i].Opacity = 0.55 + 0.45 * (0.5 - 0.5 * Math.Cos(2 * Math.PI * (clock + i * 0.6) / 7));
-            glows[i].Opacity = lines[i].Opacity * 0.3;
-            halos[i].Opacity = lines[i].Opacity * 0.12;
-        }
-    }
+    private void Draw() => waves.Draw(clock, proximity);
     public void Refresh()
     {
         // Only devices on the network right now; offline PCs are listed under Past connections. Users see paired PCs only.
@@ -356,9 +296,16 @@ internal sealed class HomePage : IPage
         string shown = string.Join("\n", peers.Select(p => string.Join("\t", p.Fingerprint, p.Name, p.Paired, p.Address, p.TrustLabel)).Concat(browsers.Select(b => string.Join("\t", b.Handle, b.Label, b.Address))).Append(string.Join("\t", more, app.Search, app.EffectiveTheme)));
         if (shown != shownDevices)
             Devices(peers, browsers, count, more, shown);
-        double speed = app.Engine.Transfers.Records.Where(r => !r.Terminal).Sum(r => r.BytesPerSecond);
-        status.Text = speed > 0 ? $"{speed / 1048576:0.0} MB/s transferring" : "";
-        status.Visibility = speed > 0 ? Visibility.Visible : Visibility.Collapsed;
+        // Shown for the whole time files move (not only while the speed reads above zero), so it does not blink.
+        TransferRecord[] moving = app.Engine.Transfers.Records.Where(r => r.State is TransferState.Sending or TransferState.Receiving or TransferState.Verifying).ToArray();
+        double speed = moving.Sum(r => r.BytesPerSecond);
+        speedFrame.Visibility = moving.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (moving.Length > 0)
+        {
+            TransferRecord first = moving[0];
+            speedTitle.Text = moving.Length > 1 ? moving.Length + " transfers" : (first.Direction == "Received" ? "Receiving from " : "Sending to ") + first.PeerName;
+            speedDetail.Text = (speed > 0 ? $"{speed / 1048576:0.0} MB/s" : "Starting") + (moving.Length == 1 && first.TimeLeft.Length > 0 ? " · " + first.TimeLeft : "");
+        }
         BrowserDevice[] waiting = app.Engine.Browser.Devices.Where(b => !b.Approved).ToArray();
         string asking = string.Join("\n", waiting.Select(b => string.Join("\t", b.Handle, b.Label, b.Address)));
         bool appearing = waiting.Length > 0 && pendingFrame.Visibility != Visibility.Visible;
@@ -1014,6 +961,110 @@ internal sealed class HomePage : IPage
         approvals.Children.Insert(0, C.Eyebrow("Allow devices", new(0, 0, 0, 8)));
         approvals.Margin = new(0, 0, 0, 6);
         return Sheet("Open on your phone", approvals, row, action);
+    }
+}
+
+/// <summary>
+/// Home's waving rings: ten coloured lines that spin, morph through three shapes and shimmer, each with a soft glow drawn as two wide faint
+/// copies of the line (a blur would redraw every frame). Home draws them full size; the send ring draws them smaller with the same motion.
+/// </summary>
+internal sealed class WaveRings
+{
+    // Ten wave rings (the design's seven plus amber, sky blue and coral): radius, wave height, lobes, colour, spin seconds, reversed, morph seconds, pointer pull.
+    // Spin is 1.5× and morph 1.6× the design's timing, for a calmer field.
+    public static readonly (double R, double A, int N, string Color, double Spin, bool Reverse, double Morph, double Pull)[] Rings = [(268, 9, 14, "#B57CFF", 135, false, 11.2, 14), (273, 10, 18, "#3FE0FF", 195, true, 14.4, 8), (277, 8, 22, "#3DF5A0", 165, false, 9.6, 12), (282, 11, 12, "#FF6AD5", 240, true, 16, 6), (290, 9, 16, "#D49BFF", 285, true, 15.2, 9), (284, 10, 20, "#5CF0D0", 262.5, false, 13.6, 10), (299, 5, 28, "#A7B6FF", 360, true, 12, 15), (271, 7, 16, "#F5B54A", 210, true, 12.8, 11), (287, 8, 24, "#6FB7FF", 300, false, 10.4, 7), (294, 7, 13, "#FF8A80", 225, true, 14.8, 12)];
+    private readonly double Middle, size, wave;
+    private readonly System.Windows.Shapes.Path[] lines = new System.Windows.Shapes.Path[Rings.Length], glows = new System.Windows.Shapes.Path[Rings.Length], halos = new System.Windows.Shapes.Path[Rings.Length];
+    private readonly Point[] samples = new Point[180];
+    public Canvas Glow
+    {
+        get;
+    }
+    public Canvas Lines
+    {
+        get;
+    }
+    /// <param name="stage">The square the rings are centred in.</param>
+    /// <param name="size">Radius scale (Home's rings sit at 268–299 px).</param>
+    /// <param name="wave">Wave height scale.</param>
+    /// <param name="line">Line width.</param>
+    /// <param name="glow">Width of the inner faint glow copy.</param>
+    /// <param name="halo">Width of the outer faint glow copy.</param>
+    public WaveRings(double stage, double size = 1, double wave = 1, double line = 0.5, double glow = 4, double halo = 12)
+    {
+        (Middle, this.size, this.wave) = (stage / 2, size, wave);
+        Glow = new()
+        {
+            Width = stage,
+            Height = stage,
+            IsHitTestVisible = false
+        };
+        Lines = new()
+        {
+            Width = stage,
+            Height = stage,
+            IsHitTestVisible = false
+        };
+        for (int i = 0; i < Rings.Length; i++)
+        {
+            SolidColorBrush ink = new((Color)ColorConverter.ConvertFromString(Rings[i].Color));
+            ink.Freeze();
+            (halos[i], glows[i], lines[i]) = (new()
+            {
+                Stroke = ink,
+                StrokeThickness = halo,
+                StrokeLineJoin = PenLineJoin.Round
+            }, new()
+            {
+                Stroke = ink,
+                StrokeThickness = glow,
+                StrokeLineJoin = PenLineJoin.Round
+            }, new()
+            {
+                Stroke = ink,
+                StrokeThickness = line,
+                StrokeLineJoin = PenLineJoin.Round
+            });
+            Glow.Children.Add(halos[i]);
+            Glow.Children.Add(glows[i]);
+            Lines.Children.Add(lines[i]);
+        }
+    }
+    /// <summary>Each ring spins, morphs through the design's three shapes (A, 1.35 A, .5 A with shifted phase) and shimmers between .55 and 1.</summary>
+    public void Draw(double clock, double proximity)
+    {
+        for (int i = 0; i < Rings.Length; i++)
+        {
+            (double R0, double A0, int N, string _, double Spin, bool Reverse, double Morph, double Pull) = Rings[i];
+            double R = R0 * size, A = A0 * wave, p = i * 0.7, spin = (Reverse ? -2 : 2) * Math.PI * clock / Spin, u = clock / Morph % 1 * 3;
+            int k = (int)u;
+            double ease = Bezier.Wave.Ease(u - k);
+            (double A, double Phase)[] shapes = [(A, p), (A * 1.35, p + Math.PI * 0.66), (A * 0.5, p + Math.PI * 1.33), (A, p)];
+            double height = shapes[k].A + (shapes[k + 1].A - shapes[k].A) * ease, phase = shapes[k].Phase + (shapes[k + 1].Phase - shapes[k].Phase) * ease;
+            double scale = 1 + proximity * Pull * (i % 3 == 1 ? -1 : 1) * 0.0045, half = Math.Floor(N / 2.0 + 0.5);
+            for (int step = 0; step < samples.Length; step++)
+            {
+                double t = step * Math.PI / 90, r = (R + height * Math.Sin(N * t + phase) + height * 0.35 * Math.Sin(half * t - phase * 1.3)) * scale;
+                samples[step] = new(Middle + r * Math.Cos(t + spin), Middle + r * Math.Sin(t + spin));
+            }
+            // Smooth curves through the samples (Catmull-Rom as cubic Béziers), so the ring has no corners between points.
+            StreamGeometry geometry = new();
+            using (StreamGeometryContext path = geometry.Open())
+            {
+                int n = samples.Length;
+                path.BeginFigure(samples[0], false, true);
+                for (int j = 0; j < n; j++)
+                {
+                    Point a = samples[(j + n - 1) % n], b = samples[j], c = samples[(j + 1) % n], d = samples[(j + 2) % n];
+                    path.BezierTo(b + (c - a) / 6, c - (d - b) / 6, c, true, true);
+                }
+            }
+            geometry.Freeze();
+            lines[i].Data = glows[i].Data = halos[i].Data = geometry;
+            lines[i].Opacity = 0.55 + 0.45 * (0.5 - 0.5 * Math.Cos(2 * Math.PI * (clock + i * 0.6) / 7));
+            glows[i].Opacity = lines[i].Opacity * 0.3;
+            halos[i].Opacity = lines[i].Opacity * 0.12;
+        }
     }
 }
 
