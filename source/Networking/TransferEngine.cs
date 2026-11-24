@@ -146,6 +146,7 @@ public sealed partial class TransferEngine : IDisposable
     }
     public void Stop()
     {
+        Interlocked.Increment(ref browserGeneration);
         Browser.Stop();
         lifetime?.Cancel();
         listener?.Stop();
@@ -216,9 +217,18 @@ public sealed partial class TransferEngine : IDisposable
         StartLanDiscovery();
         PeersChanged?.Invoke();
     }
+    /// <summary>The desktop app starts the phone page in the background, so its window never waits for the web server. Tests start it in line.</summary>
+    public bool BrowserInBackground
+    {
+        get; set;
+    }
+    /// <summary>Finishes when the latest phone page start has finished, whether or not it worked.</summary>
+    public Task BrowserStarting { get; private set; } = Task.CompletedTask;
+    private int browserGeneration;
     private void ApplyBrowserSettings()
     {
         Browser.ApplySecurityPolicy();
+        int generation = Interlocked.Increment(ref browserGeneration);
         if (!Running || Adapter == null || !store.Preferences.BrowserSharingEnabled)
         {
             Browser.Stop();
@@ -229,6 +239,11 @@ public sealed partial class TransferEngine : IDisposable
             return;
         if (Browser.Running)
             Browser.Stop();
+        if (BrowserInBackground)
+        {
+            BrowserStarting = StartBrowserAsync(BrowserStarting, Adapter, generation);
+            return;
+        }
         try
         {
             Browser.StartAsync(Adapter, allowLoopback ? 0 : 80).GetAwaiter().GetResult();
@@ -237,6 +252,24 @@ public sealed partial class TransferEngine : IDisposable
         {
             Status?.Invoke("Phone/browser sharing could not start: " + error.Message);
         }
+    }
+    private async Task StartBrowserAsync(Task previous, NetworkAdapter network, int generation)
+    {
+        // One start at a time; a start that is no longer the latest, or sharing that stopped meanwhile, does nothing or stops its page again.
+        await previous.ConfigureAwait(false);
+        if (generation != Volatile.Read(ref browserGeneration) || !Running)
+            return;
+        try
+        {
+            await Task.Run(() => Browser.StartAsync(network, allowLoopback ? 0 : 80)).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            Status?.Invoke("Phone/browser sharing could not start: " + error.Message);
+            return;
+        }
+        if (generation != Volatile.Read(ref browserGeneration) || !Running)
+            Browser.Stop();
     }
     private DateTime lastPeersRefresh;
     internal void Observe(Peer peer)

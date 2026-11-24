@@ -1,3 +1,11 @@
+2026-11-24 - hopo 2.6.4: no more freezes, delete a transfer, livelier send ring
+
+Windows: the window no longer stops responding while the phone page starts,
+while settings are saved, during the network check or when a drive is
+unplugged. hopo Admin can delete one finished transfer from Transfers and
+History (received files stay). The Ctrl+Shift+S ring opens with motion and
+colour: a turning rainbow orbit, devices that pop in, each in its own colour.
+
 2026-11-24 - hopo 2.6.3: Send with hopo in the first Windows 11 menu
 
 Windows 11: right-click files or folders and Send with hopo is in the first

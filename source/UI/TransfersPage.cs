@@ -34,7 +34,7 @@ internal sealed class TransfersPage : IPage
     {
         foreach ((string name, Button button) in filters)
             button.SetResourceReference(Control.BackgroundProperty, name == filter ? "PrimarySoft" : "Surface");
-        TransferRecord[] records = app.Engine.Transfers.Records.Where(r => Matches(r) && (r.Title.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.PeerName.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.Files.Any(f => f.RelativePath.Contains(app.Search, StringComparison.OrdinalIgnoreCase)))).Take(100).ToArray();
+        TransferRecord[] records = app.Engine.Transfers.Records.Where(r => Matches(r) && (r.Title.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.PeerName.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.Files.Any(f => f.RelativePath.Contains(app.Search, StringComparison.OrdinalIgnoreCase)))).Take(50).ToArray();
         string key = string.Join('|', records.Select(r => r.Id + r.Direction));
         if (layoutKey != key || rows.Children.Count == 0)
         {
@@ -135,12 +135,22 @@ internal sealed class TransferRow
             buttons.Children.Add(C.Small("Cancel", () => app.Engine.Transfers.Cancel(record.Id, record.Direction)));
         if (record.Terminal && record.Direction == "Sent" && record.State != TransferState.Completed && !record.Transport.Contains("HTTP", StringComparison.Ordinal))
             buttons.Children.Add(C.Small("Retry", () => { app.Engine.Retry(record); app.Tell("Retry queued. The recipient will be asked again."); }));
-        if (record.Direction == "Received" && Directory.Exists(record.Destination))
-        {
-            Button reveal = C.Small("Reveal receive folder", () => app.Reveal(record.Destination));
-            reveal.Margin = new(8, 0, 0, 0);
-            buttons.Children.Add(reveal);
-        }
+        // The folder is checked when clicked, not while drawing: an unplugged or network drive would freeze the window.
+        if (record.Direction == "Received" && record.Destination.Length > 0)
+            buttons.Children.Add(C.Small("Reveal receive folder", () => app.Reveal(record.Destination)));
+        if (record.Terminal && app.Admin)
+            buttons.Children.Add(C.Small("Delete", () => Delete(app, record)));
+        for (int i = 1; i < buttons.Children.Count; i++)
+            ((FrameworkElement)buttons.Children[i]).Margin = new(8, 0, 0, 0);
+    }
+    /// <summary>hopo Admin removes one finished transfer from the list and history; received files stay on disk.</summary>
+    public static void Delete(AppShell app, TransferRecord record)
+    {
+        if (MessageBox.Show(app.Window, "Delete this transfer from the list and history?\n\n" + record.Title + " · " + record.PeerName + "\n\nReceived files stay on this PC.", "Delete transfer", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+        if (app.Engine.Transfers.Remove(record.Id, record.Direction))
+            app.Tell("Transfer deleted from the list. Received files were kept.");
+        app.RefreshPage();
     }
     private void UpdateFiles()
     {
