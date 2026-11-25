@@ -10,6 +10,9 @@ internal sealed class Dialogs(AppShell app)
     private Window? pairingWindow;
     private Window Create(string title, double width = 560)
     {
+        // With hopo hidden in the tray or minimised, an owned dialog had no taskbar button and stayed out of sight, so hopo looked frozen.
+        // Such a dialog stands on its own: centred on the screen, in the taskbar, and brought to the front once.
+        Window? owner = pairingWindow is { IsVisible: true } ? pairingWindow : app.Window.IsVisible && app.Window.WindowState != WindowState.Minimized ? app.Window : null;
         Window window = new()
         {
             Title = title,
@@ -17,11 +20,15 @@ internal sealed class Dialogs(AppShell app)
             SizeToContent = SizeToContent.Height,
             MaxHeight = Math.Max(500, Math.Min(850, SystemParameters.WorkArea.Height - 50)),
             ResizeMode = ResizeMode.NoResize,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Owner = pairingWindow is { IsVisible: true } ? pairingWindow : app.Window,
+            WindowStartupLocation = owner != null ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen,
+            Owner = owner,
+            ShowInTaskbar = owner == null,
+            Topmost = owner == null,
             FontFamily = new("Segoe UI"),
             FontSize = 13
         };
+        if (owner == null)
+            window.ContentRendered += (_, _) => { window.Activate(); window.Topmost = false; };
         window.Resources.MergedDictionaries.Add(app.Window.Resources);
         window.SetResourceReference(Control.BackgroundProperty, "Background");
         window.SetResourceReference(Control.ForegroundProperty, "Text");

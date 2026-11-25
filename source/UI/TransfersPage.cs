@@ -30,25 +30,37 @@ internal sealed class TransfersPage : IPage
         View = C.Stack(C.Hero("Manage", "Transfers", "Live progress, verified on arrival."), C.Space(tabs, 20), rows,
             C.Space(C.Text("Pause/resume and restart continuation are planned. Retry starts a new transfer and asks the recipient for approval again.", 11, "Muted"), 0, 20));
     }
+    private string shownFilter = "";
     public void Refresh()
     {
-        foreach ((string name, Button button) in filters)
-            button.SetResourceReference(Control.BackgroundProperty, name == filter ? "PrimarySoft" : "Surface");
+        if (shownFilter != filter)
+        {
+            shownFilter = filter;
+            foreach ((string name, Button button) in filters)
+                button.SetResourceReference(Control.BackgroundProperty, name == filter ? "PrimarySoft" : "Surface");
+        }
         TransferRecord[] records = app.Engine.Transfers.Records.Where(r => Matches(r) && (r.Title.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.PeerName.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.Files.Any(f => f.RelativePath.Contains(app.Search, StringComparison.OrdinalIgnoreCase)))).Take(50).ToArray();
         string key = string.Join('|', records.Select(r => r.Id + r.Direction));
         if (layoutKey != key || rows.Children.Count == 0)
         {
+            // A new or removed transfer reorders the list; cards that are still listed are kept (with their open file details and
+            // buttons under the pointer) and only new transfers get a new card.
             layoutKey = key;
             rows.Children.Clear();
-            cards.Clear();
+            Dictionary<string, TransferRow> kept = [];
             if (records.Length == 0)
                 rows.Children.Add(C.Empty("Nothing in this queue.", "Send files from the Send screen, or approve an incoming transfer. Active and finished jobs appear here.", "transfer", C.Button("Choose files", app.PickFiles, icon: "plus")));
             foreach (TransferRecord record in records)
             {
-                TransferRow row = new(app, record);
-                cards[record.Id + record.Direction] = row;
+                string id = record.Id + record.Direction;
+                if (!cards.TryGetValue(id, out TransferRow? row))
+                    row = new(app, record);
+                kept[id] = row;
                 rows.Children.Add(C.Space(row.View, 14));
             }
+            cards.Clear();
+            foreach ((string id, TransferRow row) in kept)
+                cards[id] = row;
         }
         foreach (TransferRecord record in records)
         {
@@ -103,23 +115,34 @@ internal sealed class TransferRow
         UpdateButtons();
         Update(record);
     }
+    private TransferState? shownState;
     public void Update(TransferRecord next)
     {
+        // An unchanged record (most refreshes, for finished transfers) costs nothing.
+        if (ReferenceEquals(next, record) && shownState != null)
+            return;
         record = next;
         title.Text = record.FileCount + record.FolderCount > 1 ? $"{Count(record.FileCount, "file")} · {Count(record.FolderCount, "folder")}" : record.Title;
         status.Text = record.StatusText;
-        status.SetResourceReference(TextBlock.ForegroundProperty, record.State == TransferState.Completed ? "Success" : record.State == TransferState.Failed ? "Danger" : "Primary");
+        bool colours = shownState != record.State;
+        shownState = record.State;
+        if (colours)
+        {
+            status.SetResourceReference(TextBlock.ForegroundProperty, record.State == TransferState.Completed ? "Success" : record.State == TransferState.Failed ? "Danger" : "Primary");
+            progress.SetResourceReference(Control.ForegroundProperty, record.State == TransferState.Completed ? "Success" : "Primary");
+        }
         detail.Text = $"{record.Direction} · {record.PeerName} · LAN {record.PeerAddress} · {record.Transport}";
         current.Text = record.CurrentFile.Length > 0 ? record.CurrentFile : record.State == TransferState.AwaitingApproval ? "Waiting for the recipient to choose Accept or Decline." : "Preparing the transfer.";
         if (record.State == TransferState.Completed)
             current.Text = record.Transport.Contains("HTTP", StringComparison.Ordinal) ? record.Direction == "Received" ? "Saved on this PC · SHA-256 recorded locally" : "Sent to browser · browser saving is controlled by that device" : $"{Count(record.VerifiedFiles, "file")} verified · {Count(record.FolderCount, "folder")} · {Count(record.SkippedFiles, "file")} skipped";
         progress.Value = record.Progress;
         AutomationProperties.SetName(progress, "Transfer progress: " + record.ProgressText);
-        progress.SetResourceReference(Control.ForegroundProperty, record.State == TransferState.Completed ? "Success" : "Primary");
         amount.Text = record.ProgressText;
         speed.Text = record.SpeedText + (record.TimeLeft.Length > 0 ? " · " + record.TimeLeft : "");
-        error.Text = record.Error;
-        error.Visibility = record.Error.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        // Items left out of a send are listed with their reasons, so a skipped file is never a silent surprise.
+        string notSent = record.NotSent.Count == 0 ? "" : $"Not sent ({record.NotSent.Count}): " + string.Join("\n", record.NotSent.Take(5)) + (record.NotSent.Count > 5 ? "\n…" : "");
+        error.Text = string.Join("\n", new[] { record.Error, notSent }.Where(text => text.Length > 0));
+        error.Visibility = error.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         expansion.Header = $"File details ({Math.Max(record.FileCount, record.Files.Count)})";
         if (expansion.IsExpanded)
             UpdateFiles();
@@ -154,10 +177,23 @@ internal sealed class TransferRow
     }
     private void UpdateFiles()
     {
-        fileDetails.Children.Clear();
-        foreach (TransferFile file in record.Files.Take(200))
-            fileDetails.Children.Add(C.Space(C.Text($"{file.RelativePath}\n{file.Status} · {Format.Bytes(file.Bytes)} / {Format.Bytes(file.Size)}", 11, "Muted"), 10));
-        if (Math.Max(record.FileCount, record.Files.Count) > 200)
-            fileDetails.Children.Add(C.Text("Showing the first 200 file details. The current file is shown above.", 11, "Muted"));
+        // The rows are made once and their text updated in place; rebuilding 200 rows four times a second froze the window.
+        TransferFile[] files = [.. record.Files.Take(200)];
+        bool more = Math.Max(record.FileCount, record.Files.Count) > 200;
+        if (fileDetails.Children.Count != files.Length + (more ? 1 : 0))
+        {
+            fileDetails.Children.Clear();
+            foreach (TransferFile _ in files)
+                fileDetails.Children.Add(C.Space(C.Text("", 11, "Muted"), 10));
+            if (more)
+                fileDetails.Children.Add(C.Text("Showing the first 200 file details. The current file is shown above.", 11, "Muted"));
+        }
+        for (int i = 0; i < files.Length; i++)
+        {
+            string text = $"{files[i].RelativePath}\n{files[i].Status} · {Format.Bytes(files[i].Bytes)} / {Format.Bytes(files[i].Size)}";
+            TextBlock row = (TextBlock)fileDetails.Children[i];
+            if (row.Text != text)
+                row.Text = text;
+        }
     }
 }

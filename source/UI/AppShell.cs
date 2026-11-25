@@ -125,10 +125,16 @@ internal sealed class AppShell : IDisposable
         Engine.Sync.Changed += () => Ui(() => { if (CurrentPage == "Sync") Later(); });
         Engine.Status += message => Ui(() => Tell(message));
         Engine.PeersChanged += () => Ui(() => { RefreshExplorerMenu(); if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces") Later(); });
-        Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home" or "Send") Later(); if (!preview && Engine.Running) _ = Firewall.EnsureAsync(); });
+        Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home" or "Send") Later(); if (!preview && Engine.Running && FirewallPorts() != firewallPorts) { firewallPorts = FirewallPorts(); _ = Firewall.EnsureAsync(); } });
         Engine.Browser.ApprovalRequested += device => Ui(() => NotifyWaiting(device));
         Engine.Transfers.Changed += record => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") Later(); });
         Engine.Transfers.PersistenceFailed += _ => Ui(() => Tell("History could not be saved. Check free space and permissions in the app's local metadata folder."));
+        Store.SaveFailed += error => Ui(() => Tell("Changes could not be saved: " + error.Message + " They stay in memory and are saved again with the next change."));
+        // Nothing on a hidden or minimised window is seen, so its endless animations pause until it shows again.
+        Window.IsVisibleChanged += (_, _) => Motion.Pause(!Window.IsVisible || Window.WindowState == WindowState.Minimized);
+        Window.StateChanged += (_, _) => Motion.Pause(!Window.IsVisible || Window.WindowState == WindowState.Minimized);
+        // hopo can start hidden in the tray; the animations start moving when the window is first shown.
+        Motion.Pause(!Window.IsVisible);
         Engine.Completed += record => Ui(() =>
         {
             if (notifications != null && Store.Preferences.Notifications)
@@ -196,7 +202,8 @@ internal sealed class AppShell : IDisposable
         Find<Button>("CloseMenu").Click += (_, _) => ShowMenu(false);
         Find<Button>("MenuScrim").Click += (_, _) => ShowMenu(false);
         Window.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape && Find<Grid>("MenuLayer").Visibility == Visibility.Visible) { ShowMenu(false); e.Handled = true; } };
-        Find<TextBox>("SearchBox").TextChanged += (_, _) => page?.Refresh();
+        // Typing is batched with the other refreshes, so a long list is not rebuilt for every key.
+        Find<TextBox>("SearchBox").TextChanged += (_, _) => Later();
         Find<Button>("ReceiveToggle").Click += (_, _) => { try { ToggleReceiving(); } catch (Exception e) { Error(e); } };
         Find<Button>("OpenBrowser").Click += (_, _) => OpenBrowser();
         Window.Closing += OnClosing;
@@ -294,13 +301,19 @@ internal sealed class AppShell : IDisposable
         if (announce)
             Tell(admin ? "hopo Admin: every page and setting is available." : "hopo: Home, Send files, Text & links and Transfers.");
     }
+    private string? menuPeers;
     public void RefreshExplorerMenu()
     {
         if (preview || Integration == null)
             return;
+        // The registry is rewritten only when the paired PCs listed in Explorer change, not on every device check.
+        string now = string.Join("\n", Store.Peers.Where(p => p.Paired && !p.Blocked).Select(p => p.Fingerprint + "\t" + p.Name).Order(StringComparer.Ordinal));
+        if (now == menuPeers)
+            return;
         try
         {
             Integration.Refresh(Store.Peers);
+            menuPeers = now;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException) { Tell("Explorer integration needs attention: " + error.Message); }
     }
@@ -324,7 +337,7 @@ internal sealed class AppShell : IDisposable
         // Keep existing draft files unless the user explicitly replaces them.
         if (Selection.Count > 0 && !preview && MessageBox.Show(Window, "Replace the current unsent file selection with the files selected in Explorer?", "Share with hopo", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
             return;
-        _ = await Task.Run(() => FileCatalog.BuildAsync(selected, Guid.NewGuid().ToString("N"), false, default));
+        _ = await Task.Run(() => FileCatalog.BuildAsync(selected, Guid.NewGuid().ToString("N"), false, default, null, []));
         if (!Engine.Running && !preview)
             ToggleReceiving();
         Selection.Clear();
@@ -439,6 +452,9 @@ internal sealed class AppShell : IDisposable
     }
     public void RefreshPage() => page?.Refresh();
     private void Later() => later.IsEnabled = true;
+    // The firewall rules depend only on the ports; phone events that leave them unchanged do not re-check the rules.
+    private string firewallPorts = "";
+    private string FirewallPorts() => Engine.Port + ":" + (Engine.Browser.Running ? string.Join(",", Engine.Browser.Ports) : "");
     /// <summary>Starts, changes or stops the Explorer send shortcut to match the saved setting.</summary>
     public void UpdateShortcut()
     {
@@ -569,13 +585,30 @@ internal sealed class AppShell : IDisposable
         Find<System.Windows.Shapes.Ellipse>("NetworkDot").SetResourceReference(System.Windows.Shapes.Shape.FillProperty, Engine.Running ? "Mint" : "Muted");
         Find<TextBlock>("ThisDevice").Text = Store.Preferences.DeviceName;
         Find<ContentControl>("ThisAvatar").Content = C.Avatar(Store.Preferences.DeviceName, Profiles.Picture(Store), 36);
-        try
+        _ = ShowStorageAsync(Store.Preferences.ReceiveFolder);
+    }
+    /// <summary>The receive drive is measured off the UI thread: a slow or disconnected drive would otherwise freeze the window.</summary>
+    private async Task ShowStorageAsync(string folder)
+    {
+        (long Free, long Total)? space = await Task.Run<(long, long)?>(() =>
         {
-            DriveInfo drive = new(Path.GetPathRoot(Store.Preferences.ReceiveFolder)!);
-            Find<TextBlock>("StorageText").Text = $"{Format.Bytes(drive.AvailableFreeSpace)} free of {Format.Bytes(drive.TotalSize)}";
-            Find<ProgressBar>("StorageBar").Value = 100.0 * (drive.TotalSize - drive.AvailableFreeSpace) / drive.TotalSize;
+            try
+            {
+                DriveInfo drive = new(Path.GetPathRoot(folder)!);
+                return (drive.AvailableFreeSpace, drive.TotalSize);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
+        });
+        if (space is (long free, long total) && total > 0)
+        {
+            Find<TextBlock>("StorageText").Text = $"{Format.Bytes(free)} free of {Format.Bytes(total)}";
+            Find<ProgressBar>("StorageBar").Value = 100.0 * (total - free) / total;
         }
-        catch (IOException) { Find<TextBlock>("StorageText").Text = "Receive drive unavailable"; Find<ProgressBar>("StorageBar").Value = 0; }
+        else
+        {
+            Find<TextBlock>("StorageText").Text = "Receive drive unavailable";
+            Find<ProgressBar>("StorageBar").Value = 0;
+        }
     }
     public void PickFiles()
     {
@@ -612,7 +645,8 @@ internal sealed class AppShell : IDisposable
             if (roots.Length > 256)
                 throw new InvalidDataException("Select up to 256 top-level files or folders.");
             Tell("Checking selected files and folder contents…");
-            Manifest manifest = await Task.Run(() => FileCatalog.BuildAsync(roots, Guid.NewGuid().ToString("N"), false, default));
+            List<string> leftOut = [];
+            Manifest manifest = await Task.Run(() => FileCatalog.BuildAsync(roots, Guid.NewGuid().ToString("N"), false, default, null, leftOut));
             Selection.Clear();
             foreach (string root in roots)
             {
@@ -622,11 +656,13 @@ internal sealed class AppShell : IDisposable
             }
             if (openSend)
                 Navigate("Send");
-            Tell($"{manifest.FileCount} files and {manifest.FolderCount} folders ready. Select a paired recipient.");
+            Tell($"{manifest.FileCount} files and {manifest.FolderCount} folders ready. Select a paired recipient." + LeftOut(leftOut));
         }
         catch (Exception error) { Error(error); }
         finally { selecting = false; }
     }
+    /// <summary>Items that will not be sent, for the status line.</summary>
+    public static string LeftOut(List<string> leftOut) => leftOut.Count == 0 ? "" : $" {leftOut.Count} {(leftOut.Count == 1 ? "item" : "items")} will not be sent: " + string.Join("; ", leftOut.Take(3)) + (leftOut.Count > 3 ? "; …" : "") + ".";
     public void SendSelected(Peer peer)
     {
         _ = Engine.Send(peer, Selection.Select(s => s.Path));

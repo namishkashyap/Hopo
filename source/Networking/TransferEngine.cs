@@ -197,7 +197,7 @@ public sealed partial class TransferEngine : IDisposable
         lanDiscovery?.QueryNow();
         foreach (Peer peer in store.Peers.Where(p => p.Paired && !p.Blocked))
             ProbeInBackground(peer);
-        PeersChanged?.Invoke();
+        PeersMaybeChanged();
     }
     public void ApplySavedPreferences()
     {
@@ -276,7 +276,6 @@ public sealed partial class TransferEngine : IDisposable
         if (generation != Volatile.Read(ref browserGeneration) || !Running)
             Browser.Stop();
     }
-    private DateTime lastPeersRefresh;
     internal void Observe(Peer peer)
     {
         if (peer.Fingerprint == Fingerprint || store.Blocked(peer.Fingerprint))
@@ -297,13 +296,8 @@ public sealed partial class TransferEngine : IDisposable
         }
         nearby[peer.Fingerprint] = peer;
         AutoConnectPeer(peer);
-        // Repeated announcements of an unchanged device refresh the pages at most every 2 seconds.
-        bool changed = known == null || known.Name != peer.Name || known.Address != peer.Address || known.Port != peer.Port || !known.Online;
-        if (changed || DateTime.UtcNow - lastPeersRefresh >= TimeSpan.FromSeconds(2))
-        {
-            lastPeersRefresh = DateTime.UtcNow;
-            PeersChanged?.Invoke();
-        }
+        // Repeated announcements of an unchanged device do not refresh the pages.
+        PeersMaybeChanged();
         Peer? trusted = store.Trusted(peer.Fingerprint);
         if (trusted != null)
             ProbeInBackground(trusted with
@@ -327,9 +321,23 @@ public sealed partial class TransferEngine : IDisposable
             Wire.Require(await Wire.ReadAsync(channel.Stream, timeout.Token), "pong");
             // Only where and when it was seen are updated, so a slow reply cannot undo Stop trusting, a rename or a block made meanwhile.
             store.TouchPeer(peer.Fingerprint, peer.Address, peer.Port, peer.BrowserUrl);
-            PeersChanged?.Invoke();
+            PeersMaybeChanged();
         }
         catch (Exception error) when (error is IOException or SocketException or AuthenticationException or OperationCanceledException) { }
+    }
+    private readonly object peerGate = new();
+    private string shownPeers = "";
+    /// <summary>Device checks and announcements arrive every few seconds; pages and the Explorer menu hear about them only when something they show changed.</summary>
+    private void PeersMaybeChanged()
+    {
+        string now = string.Join("\n", Peers.Select(p => string.Join("\t", p.Fingerprint, p.Name, p.Address, p.Port, p.Online, p.Paired, p.Blocked, p.Trusted, p.Favorite, p.KeyVerified, p.BrowserUrl)));
+        lock (peerGate)
+        {
+            if (now == shownPeers)
+                return;
+            shownPeers = now;
+        }
+        PeersChanged?.Invoke();
     }
     public void EditPeer(Peer peer)
     {
@@ -737,12 +745,18 @@ public sealed partial class TransferEngine : IDisposable
             {
                 byte[] buffer = new byte[65536];
                 long remaining = item.Entry.Size;
+                // One timeout per file, pushed back after every read, and the pairing re-checked once a second: not both for every 64 KB.
+                using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                long trustCheckedAt = Environment.TickCount64;
                 while (remaining > 0)
                 {
                     token.ThrowIfCancellationRequested();
-                    if (store.Trusted(fingerprint) == null)
-                        throw new AuthenticationException("The sender's access was revoked.");
-                    using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    if (Environment.TickCount64 - trustCheckedAt >= 1000)
+                    {
+                        trustCheckedAt = Environment.TickCount64;
+                        if (store.Trusted(fingerprint) == null)
+                            throw new AuthenticationException("The sender's access was revoked.");
+                    }
                     timeout.CancelAfter(TimeSpan.FromMinutes(3));
                     int read = await ssl.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), timeout.Token);
                     if (read == 0)
@@ -812,8 +826,12 @@ public sealed partial class TransferEngine : IDisposable
             await sending.WaitAsync(token);
             acquired = true;
             job.State(TransferState.Preparing);
-            Manifest manifest = await FileCatalog.BuildAsync(job.Snapshot.Sources, job.Snapshot.Id, true, token, name => job.Update(r => r with { CurrentFile = name }, false));
+            // Items that cannot be sent are left out and listed on the transfer; the rest still goes.
+            List<string> notSent = [];
+            Manifest manifest = await FileCatalog.BuildAsync(job.Snapshot.Sources, job.Snapshot.Id, true, token, name => job.Update(r => r with { CurrentFile = name }, false), notSent);
             job.Initialize(manifest);
+            if (notSent.Count > 0)
+                job.Update(r => r with { NotSent = [.. notSent.Take(50)] });
             FileCatalog.ValidateManifest(manifest);
             if (store.Trusted(peer.Fingerprint) == null)
                 throw new AuthenticationException("The recipient is no longer paired.");
@@ -859,17 +877,17 @@ public sealed partial class TransferEngine : IDisposable
                     Kind = "file",
                     Index = index
                 }, token);
-                await using (FileStream file = new(entry.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await using (FileStream file = new(entry.SourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan))
                 {
                     byte[] buffer = new byte[65536];
                     long remaining = entry.Size;
+                    using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                     while (remaining > 0)
                     {
                         token.ThrowIfCancellationRequested();
                         int read = await file.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), token);
                         if (read == 0)
                             throw new IOException("A source file became shorter during transfer.");
-                        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                         timeout.CancelAfter(TimeSpan.FromMinutes(3));
                         await channel.Stream.WriteAsync(buffer.AsMemory(0, read), timeout.Token);
                         remaining -= read;
@@ -941,8 +959,10 @@ public sealed partial class TransferEngine : IDisposable
         SocketException => "The other PC could not be reached. Check its receiving address, Wi-Fi, firewall Private-network permission, guest isolation, and VPN routing.",
         AuthenticationException => "The peer identity or encrypted connection could not be verified. Pair again and compare the codes on both PCs.",
         UnauthorizedAccessException => "Windows denied access to a file or folder. Choose a local folder you can read or write.",
-        EndOfStreamException => "The other PC disconnected before the transfer finished. Retry when it is available.",
+        EndOfStreamException => "The transfer stopped: the other PC cancelled it or the connection was lost. Verified files already received are kept; retry when it is available.",
         ObjectDisposedException => "The connection closed. Receiving may have stopped or access may have been revoked.",
+        // Raw socket text ("Unable to write data to the transport connection: An existing connection was forcibly closed…") is replaced by a plain sentence.
+        IOException { InnerException: SocketException } => "The connection to the other PC was lost: it stopped receiving, went to sleep or left the Wi-Fi. Retry when it is available.",
         _ => error.Message.Length <= 300 ? error.Message : "The transfer could not finish. Check the files and retry."
     };
     private const string OlderPeer = "Update Lantoss on the other PC to 2.0.2 or later to pair. PCs that are already paired keep working.";
@@ -962,6 +982,13 @@ public sealed partial class TransferEngine : IDisposable
             Stop();
             spaceScanner.Dispose();
             lifetime?.Dispose();
+            // Saves are written in the background; everything changed so far reaches the disk before hopo closes.
+            try
+            {
+                // Run off the caller's thread: waiting on the UI thread for work that continues on the UI thread would freeze closing.
+                Task.Run(() => Transfers.FlushAsync()).Wait(TimeSpan.FromSeconds(10));
+            }
+            catch (AggregateException) { }
         }
     }
 }

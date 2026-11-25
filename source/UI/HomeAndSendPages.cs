@@ -325,10 +325,15 @@ internal sealed class HomePage : IPage
                 Motion.Rise(pendingFrame, 0, 16, 0.5);
         }
         shownWaiting = asking;
-        // Keep an open Phone panel in step with phones arriving or being allowed.
-        if (sheet == "phone")
+        // Keep an open Phone panel in step with phones arriving or being allowed, rebuilding it only when those change
+        // (it was rebuilt, QR code included, up to four times a second during transfers, replacing Allow under the pointer).
+        string phones = app.Engine.Browser.Running + app.Engine.Browser.IpUrl + string.Join('|', app.Engine.Browser.Devices.Select(b => string.Join('/', b.Handle, b.Label, b.Address, b.Approved, b.Trusted)));
+        if (sheet == "phone" && phones != shownPhones)
             Open("phone", animate: false);
+        shownPhones = phones;
     }
+    private string shownPhones = "";
+    private (string Url, BitmapSource Image)? qrImage;
     private void Devices(Peer[] peers, BrowserDevice[] browsers, int count, int more, string shown)
     {
         shownDevices = shown;
@@ -914,12 +919,19 @@ internal sealed class HomePage : IPage
         string address;
         if (app.Engine.Browser.Running)
         {
-            using QRCodeGenerator generator = new();
-            using QRCodeData data = generator.CreateQrCode(app.Engine.Browser.IpUrl, QRCodeGenerator.ECCLevel.Q);
-            using PngByteQRCode qr = new(data);
-            using MemoryStream image = new(qr.GetGraphic(6));
+            // The QR code is drawn once per address.
+            if (qrImage?.Url != app.Engine.Browser.IpUrl)
+            {
+                using QRCodeGenerator generator = new();
+                using QRCodeData data = generator.CreateQrCode(app.Engine.Browser.IpUrl, QRCodeGenerator.ECCLevel.Q);
+                using PngByteQRCode qr = new(data);
+                using MemoryStream image = new(qr.GetGraphic(6));
+                BitmapFrame frame = BitmapFrame.Create(image, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+                frame.Freeze();
+                qrImage = (app.Engine.Browser.IpUrl, frame);
+            }
             code.Background = Brushes.White;
-            code.Child = new Image { Source = BitmapFrame.Create(image, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad) };
+            code.Child = new Image { Source = qrImage.Value.Image };
             AutomationProperties.SetName(code, "QR code for " + app.Engine.Browser.IpUrl);
             address = C.Bare(app.Engine.Browser.IpUrl);
             string url = app.Engine.Browser.IpUrl;
@@ -1087,8 +1099,15 @@ internal sealed class SendPage : IPage
         StackPanel right = C.Stack(C.Card(recipient), C.Space(phone, 0, 16), C.Space(C.Note("The recipient stays in control", "They see your identity, file count, size, and destination, then choose Accept or Decline."), 0, 18), C.Space(C.Note("Native transfers: original bytes, verified", "Folders keep their relative paths. Every native file is checked before it is finalized on the other PC.", "check"), 0, 18), C.Space(C.Text("Names, folder paths, and regular file bytes are preserved. Permissions, timestamps, alternate data streams, links, and other platform metadata are not copied.", 11, "Muted"), 0, 18));
         View = C.Stack(C.Hero("Share", "Send files", "Pick files, then a device. They approve before anything moves."), C.Columns(C.Card(left), right, 325));
     }
+    private string shown = "";
     public void Refresh()
     {
+        // Device checks arrive every few seconds; the page is rebuilt only when the selection, phones or PCs it shows changed,
+        // so an open recipient list or a button under the pointer is not replaced.
+        string key = string.Join('|', app.Selection.Select(s => s.Path + "/" + s.Size)) + "#" + app.Search + "#" + app.Engine.Browser.Running + "#" + string.Join('|', app.Engine.Browser.Browsers.Where(device => device.Approved).Select(device => device.Handle + "/" + device.Label + "/" + device.Address + "/" + device.Picture?.Length)) + "#" + string.Join('|', app.Engine.Peers.Where(p => p.Paired && !p.Blocked).Select(p => p.Fingerprint + "/" + p.Name + "/" + p.Address + "/" + p.Online));
+        if (key == shown && files.Children.Count > 0)
+            return;
+        shown = key;
         files.Children.Clear();
         totals.Text = $"{app.Selection.Count} selections · {app.Selection.Sum(s => s.Files)} files · {Format.Bytes(app.Selection.Sum(s => s.Size))}";
         SelectionItem[] visible = app.Selection.Where(s => s.Name.Contains(app.Search, StringComparison.OrdinalIgnoreCase)).ToArray();

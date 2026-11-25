@@ -8,6 +8,9 @@ public sealed class TransferJob : IDisposable
     private TransferRecord record;
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private long lastSampleBytes, currentFileBytes; private double lastSampleAt, lastEventAt;
+    // Row of each file by path. The job owns its list once Initialize builds it; snapshots handed out are copies.
+    private Dictionary<string, int> rows = [];
+    private bool ownsFiles;
     public CancellationTokenSource Cancellation { get; } = new();
     public event Action<TransferRecord>? Changed;
     public TransferJob(TransferRecord initial)
@@ -55,14 +58,53 @@ public sealed class TransferJob : IDisposable
     }
     public void Initialize(Manifest manifest, long? transferBytes = null)
     {
-        Update(r => r with
+        List<TransferFile> files = manifest.Entries.Where(e => !e.Directory).Select(e => new TransferFile { RelativePath = e.RelativePath, Size = e.Size }).ToList();
+        Dictionary<string, int> index = new(files.Count, StringComparer.Ordinal);
+        for (int i = 0; i < files.Count; i++)
+            index.TryAdd(files[i].RelativePath, i);
+        Update(r =>
         {
-            Title = manifest.Entries.Count == 1 ? manifest.Entries[0].RelativePath : $"{manifest.FileCount} files · {manifest.FolderCount} folders",
-            TotalBytes = transferBytes ?? manifest.TotalBytes,
-            FileCount = manifest.FileCount,
-            FolderCount = manifest.FolderCount,
-            Files = manifest.Entries.Where(e => !e.Directory).Select(e => new TransferFile { RelativePath = e.RelativePath, Size = e.Size }).ToList()
+            (rows, ownsFiles) = (index, true);
+            return r with
+            {
+                Title = manifest.Entries.Count == 1 ? manifest.Entries[0].RelativePath : $"{manifest.FileCount} files · {manifest.FolderCount} folders",
+                TotalBytes = transferBytes ?? manifest.TotalBytes,
+                FileCount = manifest.FileCount,
+                FolderCount = manifest.FolderCount,
+                Files = files
+            };
         });
+    }
+    /// <summary>Adds one file to a job that gathers several one-file transfers (a sync or shared-space pass); its row is listed up to 1,000 files.</summary>
+    public void AddFile(ManifestEntry entry) => Update(r =>
+    {
+        (List<TransferFile> files, int row) = Row(r, entry.RelativePath);
+        if (row < 0 && files.Count < 1000)
+        {
+            rows[entry.RelativePath] = files.Count;
+            files.Add(new TransferFile { RelativePath = entry.RelativePath, Size = entry.Size });
+        }
+        return r with
+        {
+            Files = files,
+            FileCount = r.FileCount + 1,
+            TotalBytes = r.TotalBytes + entry.Size,
+            CurrentFile = entry.RelativePath
+        };
+    }, false);
+    /// <summary>The job's own file list (copied once if it is still shared), and the row of <paramref name="path"/> in it, or -1. Called under the job lock.</summary>
+    private (List<TransferFile> Files, int Row) Row(TransferRecord r, string path)
+    {
+        List<TransferFile> files = r.Files;
+        if (!ownsFiles)
+        {
+            files = [.. r.Files];
+            rows = new(files.Count, StringComparer.Ordinal);
+            for (int i = 0; i < files.Count; i++)
+                rows.TryAdd(files[i].RelativePath, i);
+            ownsFiles = true;
+        }
+        return (files, rows.TryGetValue(path, out int row) && row < files.Count ? row : -1);
     }
     public void State(TransferState state, string error = "") => Update(r => r with { State = state, Error = error }, state != TransferState.Verifying);
     public void StartFile(ManifestEntry entry, TransferState state)
@@ -92,8 +134,7 @@ public sealed class TransferJob : IDisposable
             List<TransferFile> files = r.Files;
             if (now - lastEventAt >= .2)
             {
-                files = [.. r.Files];
-                int index = files.FindIndex(f => f.RelativePath == r.CurrentFile);
+                (files, int index) = Row(r, r.CurrentFile);
                 if (index >= 0)
                     files[index] = files[index] with
                     {
@@ -113,8 +154,7 @@ public sealed class TransferJob : IDisposable
     {
         Update(r =>
         {
-            List<TransferFile> files = [.. r.Files];
-            int index = files.FindIndex(f => f.RelativePath == entry.RelativePath);
+            (List<TransferFile> files, int index) = Row(r, entry.RelativePath);
             if (index >= 0)
                 files[index] = files[index] with
                 {
@@ -199,7 +239,8 @@ public sealed class TransferRegistry
             if (history.Count > 400)
                 foreach (string old in history.Where(p => p.Value.Terminal).OrderBy(p => p.Value.CreatedUtc).Take(history.Count - 300).Select(p => p.Key).ToArray())
                     history.Remove(old);
-            if (record.Terminal || DateTime.UtcNow - lastSave >= TimeSpan.FromSeconds(2))
+            // Progress is saved every 10 s; starting and finishing are saved at once.
+            if (record.Terminal || DateTime.UtcNow - lastSave >= TimeSpan.FromSeconds(10))
                 Save();
         }
         Changed?.Invoke(record);
@@ -244,11 +285,13 @@ public sealed class TransferRegistry
             lock (gate)
             {
                 if (!writing && !savePending)
-                    return;
+                    break;
                 pending = persistence;
             }
-            await pending.WaitAsync(token);
+            await pending.WaitAsync(token).ConfigureAwait(false);
         }
+        // The history is handed to the store's background writer; wait for it to reach the disk too.
+        await Task.Run(store.Flush, token).ConfigureAwait(false);
     }
     public void Cancel(string id, string direction)
     {

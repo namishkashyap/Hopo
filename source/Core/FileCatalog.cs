@@ -9,7 +9,11 @@ public static class FileCatalog
 {
     public const int MaxEntries = 10_000;
     public const long MaxFileBytes = 1024L * 1024 * 1024 * 1024;
-    public static async Task<Manifest> BuildAsync(IEnumerable<string> roots, string id, bool hash, CancellationToken cancellation, Action<string>? preparing = null)
+    /// <param name="skipped">
+    /// When given, items inside a selected folder that cannot be sent (reserved or too-long names, names Windows cannot open, links, files
+    /// another program holds, folders without permission) are left out and described here, and the rest is sent. Without it the first one stops the build.
+    /// </param>
+    public static async Task<Manifest> BuildAsync(IEnumerable<string> roots, string id, bool hash, CancellationToken cancellation, Action<string>? preparing = null, ICollection<string>? skipped = null)
     {
         List<ManifestEntry> entries = [];
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
@@ -38,16 +42,28 @@ public static class FileCatalog
                     continue;
                 cancellation.ThrowIfCancellationRequested();
                 preparing?.Invoke(entry.RelativePath);
-                await using FileStream stream = new(entry.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                string digest = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellation));
-                FileInfo after = new(entry.SourcePath);
-                if (after.Length != entry.Size || after.LastWriteTimeUtc != entry.SourceModifiedUtc)
-                    throw new IOException("A source file changed while preparing: " + entry.RelativePath);
-                entries[i] = entry with
+                try
                 {
-                    Sha256 = digest
-                };
+                    // Other programs may keep writing, renaming or deleting the file; a change shows up as a checksum or size mismatch.
+                    await using FileStream stream = new(entry.SourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    string digest = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellation));
+                    FileInfo after = new(entry.SourcePath);
+                    if (after.Length != entry.Size || after.LastWriteTimeUtc != entry.SourceModifiedUtc)
+                        throw new IOException("A source file changed while preparing: " + entry.RelativePath);
+                    entries[i] = entry with
+                    {
+                        Sha256 = digest
+                    };
+                }
+                catch (Exception error) when (skipped != null && error is IOException or UnauthorizedAccessException && !cancellation.IsCancellationRequested)
+                {
+                    skipped.Add(entry.RelativePath + ": " + Reason(error));
+                    entries[i] = null!;
+                }
             }
+            entries.RemoveAll(entry => entry is null);
+            if (!entries.Any(entry => !entry.Directory) && skipped is { Count: > 0 })
+                throw new IOException("Nothing could be sent. " + string.Join("; ", skipped.Take(3)));
         }
         return new Manifest { Id = id, Entries = entries };
 
@@ -60,16 +76,26 @@ public static class FileCatalog
                 cancellation.ThrowIfCancellationRequested();
                 if (Path.GetFileName(child).StartsWith(".flowshare-", StringComparison.OrdinalIgnoreCase))
                     continue;
-                FileAttributes attributes = File.GetAttributes(child);
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
-                    throw new IOException("Symbolic links, junctions, and cloud placeholders are not supported: " + child);
                 string childRelative = relative + "/" + Path.GetFileName(child);
-                if ((attributes & FileAttributes.Directory) != 0)
-                    Walk(child, childRelative);
-                else
-                    Add(child, childRelative, false);
+                try
+                {
+                    FileAttributes attributes = File.GetAttributes(child);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                        throw new IOException("Symbolic links, junctions, and cloud placeholders are not supported: " + child);
+                    ValidateSegment(Path.GetFileName(child));
+                    if ((attributes & FileAttributes.Directory) != 0)
+                        Walk(child, childRelative);
+                    else
+                        Add(child, childRelative, false);
+                }
+                catch (Exception error) when (skipped != null && error is IOException or UnauthorizedAccessException or InvalidDataException && !Limit(error))
+                {
+                    skipped.Add(childRelative + ": " + Reason(error));
+                }
             }
         }
+        // The 10,000-item and 1 TB limits and duplicate names stop the whole selection; they are never skipped one by one.
+        static bool Limit(Exception error) => error.Message.StartsWith("Select up to", StringComparison.Ordinal) || error.Message.StartsWith("A selected file exceeds", StringComparison.Ordinal) || error.Message.StartsWith("Two selections", StringComparison.Ordinal);
         void Add(string source, string relative, bool directory)
         {
             if (entries.Count >= MaxEntries)
@@ -85,6 +111,16 @@ public static class FileCatalog
             entries.Add(new ManifestEntry { RelativePath = relative, Directory = directory, Size = size, SourcePath = source, SourceModifiedUtc = directory ? DateTime.MinValue : info.LastWriteTimeUtc });
         }
     }
+    /// <summary>Why one item was left out of a send, in a short sentence.</summary>
+    private static string Reason(Exception error) => error switch
+    {
+        FileNotFoundException or DirectoryNotFoundException => "Windows cannot open this name (it ends with a dot or a space, or the item was removed)",
+        UnauthorizedAccessException => "no permission to read it",
+        InvalidDataException => error.Message,
+        IOException when error.Message.StartsWith("Symbolic links", StringComparison.Ordinal) => "a link, junction or online-only file, which hopo does not follow",
+        IOException when error.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021) => "another program is using it",
+        _ => error.Message
+    };
     public static void ValidateManifest(Manifest manifest)
     {
         if (!Guid.TryParseExact(manifest.Id, "N", out _) || manifest.Entries is null || manifest.Entries.Count is < 1 or > MaxEntries)
