@@ -1,3 +1,14 @@
+2026-11-25 - hopo 2.6.8: lighter when idle, sends around problem files, Android app
+
+Windows: hopo no longer rewrites its data file every few seconds while idle,
+pages redraw only when something changed, animations pause in the tray, and
+approval windows show with a taskbar button when hopo is hidden. A folder with
+a reserved, too-long or unopenable name, a link or a file in use is still sent;
+the transfer lists what was left out. The Ctrl+Shift+S ring has the waving Home
+rings, sends without opening hopo and shows a small notice. Android (2.6.5 to
+2.6.8): the hopo app with the same screens, Accept from the notification, trusted
+PCs, Delete in Transfers, and the Text panel opens reliably.
+
 2026-11-24 - hopo 2.6.4: no more freezes, delete a transfer, livelier send ring
 
 Windows: the window no longer stops responding while the phone page starts,

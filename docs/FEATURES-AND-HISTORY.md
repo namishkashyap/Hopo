@@ -1,4 +1,7 @@
-# hopo (formerly Lantoss) for Windows, macOS, Linux and phone browsers
+# hopo features and version history
+
+This is the earlier README, kept for its detailed feature notes. For downloads and installation, see the [README](../README.md).
+
 
 Private home-Wi-Fi file sharing. Connections between computers are direct by
 default: no password, typed code, or comparison prompt. Access-code protection
@@ -14,7 +17,7 @@ is optional.
 | 1.9.0 (previous) | Windows (MSI) | [Release v1.9.0](https://github.com/namishkashyap/Lantoss/releases/tag/v1.9.0) | `release/1.x` |
 
 Step-by-step install, first-run, firewall and uninstall instructions for each
-platform are in **[INSTALL.md](INSTALL.md)**. All versions talk to each other
+platform are in **[INSTALL.md](../INSTALL.md)**. All versions talk to each other
 on the same network, and phones need no app.
 
 ## New in 2.1: hopo
@@ -46,7 +49,7 @@ on the same network, and phones need no app.
 - **Incoming-file notifications** and sender details (name, device, address)
   in approvals, Transfers and History. An optional setting saves files in
   `Inbox/<sender>`.
-- **Security fixes** and a bolder, cleaner design. See [CHANGELOG.txt](CHANGELOG.txt).
+- **Security fixes** and a bolder, cleaner design. See [CHANGELOG.txt](../CHANGELOG.txt).
 
 ## Install on Windows
 
@@ -171,9 +174,9 @@ installer/TESTING.md explains how to remove it after all such builds are gone.
 ## Build from this repository
 
 The complete source, tests, icon assets, third-party notices and developer
-documentation are included. See [SETUP.md](SETUP.md) for prerequisites, cloning,
+documentation are included. See [SETUP.md](../SETUP.md) for prerequisites, cloning,
 verification, publishing and connecting devices. The architecture and source map
-are in [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
+are in [DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md).
 
 With the .NET 10 SDK on Windows, run from the repository root:
 
@@ -423,5 +426,5 @@ connect to this Lantoss portal.
 
 ## License
 
-Lantoss is released under the [MIT License](LICENSE). Bundled third-party
+Lantoss is released under the [MIT License](../LICENSE). Bundled third-party
 components keep their own licenses; see the `*_LICENSE.txt` and notice files.
