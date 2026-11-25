@@ -177,6 +177,7 @@ internal sealed class Shell : IDisposable
         Engine.Browser.ApprovalRequested += device => Ui(() => { string text = device.Label + " wants to connect. Open hopo to allow it."; Tell(text); if (Store.Preferences.Notifications) Notify("New phone or browser", text); });
         Engine.Transfers.Changed += _ => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") Later(); });
         Engine.Transfers.PersistenceFailed += _ => Ui(() => Tell("History could not be saved. Check free space and permissions in the app's data folder."));
+        Store.SaveFailed += error => Ui(() => Tell("Changes could not be saved: " + error.Message + " They stay in memory and are saved again with the next change."));
         Engine.Completed += record => Ui(() =>
         {
             if (Store.Preferences.Notifications)
@@ -836,7 +837,8 @@ internal sealed class Shell : IDisposable
             if (roots.Length > 256)
                 throw new InvalidDataException("Select up to 256 top-level files or folders.");
             Tell("Checking selected files and folder contents…");
-            Manifest manifest = await Task.Run(() => FileCatalog.BuildAsync(roots, Guid.NewGuid().ToString("N"), false, default));
+            List<string> leftOut = [];
+            Manifest manifest = await Task.Run(() => FileCatalog.BuildAsync(roots, Guid.NewGuid().ToString("N"), false, default, null, leftOut));
             Selection.Clear();
             foreach (string root in roots)
             {
@@ -848,7 +850,7 @@ internal sealed class Shell : IDisposable
                 RefreshPage();
             else
                 Navigate("Send");
-            Tell($"{manifest.FileCount} files and {manifest.FolderCount} folders ready. Select a paired recipient.");
+            Tell($"{manifest.FileCount} files and {manifest.FolderCount} folders ready. Select a paired recipient." + (leftOut.Count == 0 ? "" : $" {leftOut.Count} {(leftOut.Count == 1 ? "item" : "items")} will not be sent: " + string.Join("; ", leftOut.Take(3)) + (leftOut.Count > 3 ? "; …" : "") + "."));
         }
         catch (Exception error) { Error(error); }
         finally { selecting = false; }

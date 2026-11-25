@@ -19,7 +19,7 @@ public static class SyncFiles
         FileCatalog.CheckSafePath(file);
         if (!File.Exists(file))
             return "";
-        await using FileStream stream = new(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using FileStream stream = new(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
         return Convert.ToHexString(await SHA256.HashDataAsync(stream, token));
     }
     public static void ValidateSnapshot(Manifest snapshot)

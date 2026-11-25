@@ -195,23 +195,106 @@ public sealed partial class TransferEngine
         FileCatalog.ValidateRelative(entry.RelativePath);
         return entry;
     }
+    private sealed class SpacePass(TransferJob job)
+    {
+        public TransferJob Job { get; } = job;
+        public int Active, Done, Failed;
+        public long Version;
+        public string LastError = "";
+    }
+    // Shared-space and sync files move one per request. Each pass (one PC, one space, one direction) is a single entry in Transfers and
+    // History, so a folder sync no longer adds an entry per file, pushes real transfers out of History and redraws the list for each file.
+    private readonly Dictionary<string, SpacePass> spacePasses = [];
     private TransferJob SpaceJob(Peer peer, string spaceId, string direction, ManifestEntry entry)
     {
-        TransferJob job = Transfers.Add(new()
+        TransferState moving = direction == "Sent" ? TransferState.Sending : TransferState.Receiving;
+        // The file's own job is driven exactly as before (its ID names the file on the wire) but is not listed; it reports into the pass.
+        TransferJob file = new(new()
         {
             Id = Guid.NewGuid().ToString("N"),
             Direction = direction,
             PeerName = peer.Name,
             PeerFingerprint = peer.Fingerprint,
             SpaceId = spaceId,
-            State = direction == "Sent" ? TransferState.Sending : TransferState.Receiving
+            State = moving
         });
-        job.Initialize(new()
+        file.Initialize(new()
         {
-            Id = job.Snapshot.Id,
+            Id = file.Snapshot.Id,
             Entries = [entry]
         });
-        return job;
+        string key = peer.Fingerprint + "/" + spaceId + "/" + direction;
+        SpacePass pass;
+        lock (spacePasses)
+        {
+            if (!spacePasses.TryGetValue(key, out pass!) || pass.Job.Snapshot.Terminal)
+            {
+                TransferJob group = Transfers.Add(new()
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Direction = direction,
+                    PeerName = peer.Name,
+                    PeerFingerprint = peer.Fingerprint,
+                    SpaceId = spaceId,
+                    State = moving,
+                    Title = "Shared folder"
+                });
+                spacePasses[key] = pass = new(group);
+            }
+            pass.Active++;
+            pass.Version++;
+        }
+        pass.Job.AddFile(entry);
+        pass.Job.StartFile(entry, moving);
+        // Cancelling the pass (or revoking the PC) cancels the file being moved.
+        CancellationTokenRegistration cancel = pass.Job.Cancellation.Token.Register(file.Cancel);
+        long counted = 0;
+        file.Changed += now =>
+        {
+            long bytes = now.State == TransferState.Completed ? entry.Size : now.TransferredBytes;
+            long delta;
+            lock (pass)
+            {
+                delta = bytes - counted;
+                counted = bytes;
+            }
+            if (delta > 0)
+                pass.Job.Advance((int)Math.Min(delta, int.MaxValue));
+            if (!now.Terminal)
+                return;
+            cancel.Dispose();
+            long version;
+            lock (spacePasses)
+            {
+                pass.Active--;
+                if (now.State == TransferState.Completed)
+                    pass.Done++;
+                else
+                {
+                    pass.Failed++;
+                    pass.LastError = now.Error;
+                }
+                version = ++pass.Version;
+            }
+            if (now.State == TransferState.Completed)
+                pass.Job.Verified(entry);
+            else
+                pass.Job.Update(r => r with { Error = $"{pass.Failed} of {r.FileCount} files did not finish. Last: {pass.LastError}" });
+            // The pass finishes once no file has moved for three seconds.
+            _ = Task.Delay(3000).ContinueWith(_ =>
+            {
+                lock (spacePasses)
+                {
+                    if (pass.Active > 0 || pass.Version != version)
+                        return;
+                    if (spacePasses.TryGetValue(key, out SpacePass? current) && current == pass)
+                        spacePasses.Remove(key);
+                }
+                string error = pass.Failed == 0 ? "" : $"{pass.Failed} of {pass.Done + pass.Failed} files did not finish. Last: {pass.LastError}";
+                pass.Job.State(pass.Done == 0 && pass.Failed > 0 ? TransferState.Failed : TransferState.Completed, error);
+            }, TaskScheduler.Default);
+        };
+        return file;
     }
     private async Task ServeSpaceAsync(Stream stream, TcpClient client, Peer peer, WireMessage hello, CancellationToken token)
     {
@@ -433,7 +516,7 @@ public sealed partial class TransferEngine
     private static async Task SendSpaceBlobAsync(Stream stream, ManifestEntry entry, TransferJob job, Action guard, CancellationToken token)
     {
         FileCatalog.CheckSafePath(entry.SourcePath);
-        await using FileStream input = new(entry.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using FileStream input = new(entry.SourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
         if (input.Length != entry.Size || File.GetLastWriteTimeUtc(entry.SourcePath) != entry.SourceModifiedUtc)
             throw new IOException("The source is still changing. Retry shortly.");
         job.StartFile(entry, TransferState.Sending);

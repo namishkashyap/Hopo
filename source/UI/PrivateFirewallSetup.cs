@@ -108,6 +108,8 @@ internal sealed class PrivateFirewallSetup(AppShell app)
             }
             if (!retry && saved is { Confirmed: false } && saved.Signature == plan.Signature)
             {
+                // A cancelled or failed setup is not re-inspected (a hidden PowerShell) on every phone event; Retry in Connection diagnostics asks again.
+                checkedSignature = plan.Signature;
                 Status = "Firewall setup needs Windows administrator approval. Use Set up Private-network access in Connection diagnostics.";
                 return;
             }
@@ -128,6 +130,7 @@ internal sealed class PrivateFirewallSetup(AppShell app)
             Status = error is Win32Exception { NativeErrorCode: 1223 } ? "Windows administrator approval was cancelled. Retry setup from Connection diagnostics when ready." : "Firewall setup needs attention. " + error.Message;
             if (plan != null)
             {
+                checkedSignature = plan.Signature;
                 try
                 {
                     SaveState(plan, false);

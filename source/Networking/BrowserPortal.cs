@@ -1153,7 +1153,7 @@ public sealed partial class BrowserPortal : IDisposable
         try
         {
             FileCatalog.CheckSafePath(selected.Path);
-            await using FileStream source = new(selected.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using FileStream source = new(selected.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
             if (source.Length != selected.Size || File.GetLastWriteTimeUtc(selected.Path) != selected.ModifiedUtc)
                 throw new IOException("This file changed. Share it again from the PC.");
             ManifestEntry entry = new()

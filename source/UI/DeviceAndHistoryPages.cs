@@ -24,9 +24,15 @@ internal sealed class DevicesPage : IPage
         View = C.Stack(C.Hero("Manage", "Devices", "PCs running hopo on your Wi‑Fi appear here automatically. A new PC is approved once on both screens, then reconnects by itself."), C.Space(C.Inline(scan, pair, diagnostics), 18), C.Space(status, 22), list,
             C.Space(C.Note("Using your phone?", "Open Phone & browser from the menu and scan its QR code. Phones use the browser page; NAS agents and internet sharing remain unavailable.", "devices"), 0, 20));
     }
+    private string shown = "";
     public void Refresh()
     {
         status.Text = app.Engine.DiscoveryStatus;
+        // Device checks arrive every few seconds; the cards are rebuilt only when what they show changed, so buttons are not replaced under the pointer.
+        string key = string.Join(Environment.NewLine, app.Engine.Peers.Select(p => string.Join('|', p.Fingerprint, p.Name, p.Address, p.Port, p.Online, p.Paired, p.Blocked, p.Trusted, p.Favorite, p.SupportsQuickPair, p.LastSeenUtc.ToString("yyyyMMddHHmm")))) + app.Search + app.EffectiveTheme;
+        if (key == shown && list.Children.Count > 0)
+            return;
+        shown = key;
         list.Children.Clear();
         Peer[] peers = app.Engine.Peers.Where(p => p.Online && p.Name.Contains(app.Search, StringComparison.OrdinalIgnoreCase)).ToArray();
         int past = app.Engine.Peers.Count(p => !p.Online);
@@ -155,8 +161,13 @@ internal sealed class PastConnectionsPage : IPage
         this.app = app;
         View = C.Stack(C.Hero("Manage", "Past connections", "PCs you connected to before that are offline now. They return to Home by themselves when they are back on your Wi‑Fi."), list);
     }
+    private string shown = "";
     public void Refresh()
     {
+        string key = string.Join(Environment.NewLine, app.Engine.Peers.Select(p => string.Join('|', p.Fingerprint, p.Name, p.Address, p.Port, p.Online, p.Paired, p.Blocked, p.Trusted, p.Favorite, p.SupportsQuickPair, p.LastSeenUtc.ToString("yyyyMMddHHmm")))) + app.Search + app.EffectiveTheme;
+        if (key == shown && list.Children.Count > 0)
+            return;
+        shown = key;
         list.Children.Clear();
         Peer[] peers = app.Engine.Peers.Where(p => !p.Online && p.Name.Contains(app.Search, StringComparison.OrdinalIgnoreCase)).OrderByDescending(p => p.LastSeenUtc).ToArray();
         if (peers.Length == 0)

@@ -217,6 +217,8 @@ public sealed record TransferRecord
     public DateTime CreatedUtc { get; init; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; init; } = DateTime.UtcNow;
     public List<string> Sources { get; init; } = [];
+    /// <summary>Items in the selected folders that were left out of this send, each with its reason (at most 50 listed).</summary>
+    public List<string> NotSent { get; init; } = [];
     public List<TransferFile> Files { get; init; } = [];
     [JsonIgnore] public bool Terminal => State is TransferState.Completed or TransferState.Declined or TransferState.Cancelled or TransferState.Failed;
     [JsonIgnore] public double Progress => TotalBytes > 0 ? Math.Clamp(100.0 * TransferredBytes / TotalBytes, 0, 100) : State == TransferState.Completed ? 100 : 0;
@@ -224,7 +226,7 @@ public sealed record TransferRecord
     [JsonIgnore] public string ProgressText => $"{Format.Bytes(TransferredBytes)} of {Format.Bytes(TotalBytes)}";
     [JsonIgnore] public string SpeedText => BytesPerSecond > 0 && !Terminal ? $"{BytesPerSecond / 1048576:0.0} MB/s" : "—";
     [JsonIgnore] public string TimeLeft => BytesPerSecond > 0 && !Terminal ? Format.Duration((TotalBytes - TransferredBytes) / BytesPerSecond) + " left" : "";
-    [JsonIgnore] public string StatusText => State == TransferState.Completed && SkippedFiles > 0 ? $"Completed · {SkippedFiles} skipped" : State == TransferState.AwaitingApproval ? "Awaiting approval" : State.ToString();
+    [JsonIgnore] public string StatusText => State == TransferState.Completed && NotSent.Count > 0 ? $"Completed · {NotSent.Count} not sent" : State == TransferState.Completed && SkippedFiles > 0 ? $"Completed · {SkippedFiles} skipped" : State == TransferState.AwaitingApproval ? "Awaiting approval" : State.ToString();
 }
 
 public sealed record ManifestEntry

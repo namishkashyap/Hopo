@@ -55,11 +55,47 @@ internal static class Motion
         EventManager.RegisterClassHandler(typeof(Button), UIElement.PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler((sender, _) => Press((Button)sender, false)), true);
     }
     /// <summary>Endless background motion at 30 frames a second, which looks the same for slow movement and leaves the rest of the time to the app. Call the returned action to stop it: an endless animation keeps running, and keeps its element alive, after the element leaves the window.</summary>
-    public static Action Loop(IAnimatable target, DependencyProperty property, AnimationTimeline animation)
+    public static Action Loop(IAnimatable target, DependencyProperty property, AnimationTimeline animation, bool pausable = true)
     {
         Timeline.SetDesiredFrameRate(animation, 30);
-        target.BeginAnimation(property, animation);
-        return () => target.BeginAnimation(property, null);
+        if (!pausable)
+        {
+            target.BeginAnimation(property, animation);
+            return () => target.BeginAnimation(property, null);
+        }
+        AnimationClock clock = animation.CreateClock();
+        target.ApplyAnimationClock(property, clock);
+        clocks.RemoveAll(weak => !weak.TryGetTarget(out _));
+        clocks.Add(new(clock));
+        if (paused)
+            clock.Controller?.Pause();
+        return () =>
+        {
+            clocks.RemoveAll(weak => !weak.TryGetTarget(out AnimationClock? held) || held == clock);
+            target.ApplyAnimationClock(property, null);
+        };
+    }
+    /// <summary>A loop that keeps moving while the main window is hidden (the send ring and its own window).</summary>
+    public static Action Unpaused(IAnimatable target, DependencyProperty property, AnimationTimeline animation) => Loop(target, property, animation, false);
+    private static readonly List<WeakReference<AnimationClock>> clocks = [];
+    private static bool paused;
+    /// <summary>
+    /// While hopo's window is hidden in the tray or minimised nothing on it is seen, so its endless motion (Home's device pulses and ripples)
+    /// stops using the processor; it carries on when the window shows again. The send ring is its own window and keeps moving.
+    /// </summary>
+    public static void Pause(bool pause)
+    {
+        if (pause == paused)
+            return;
+        paused = pause;
+        foreach (WeakReference<AnimationClock> weak in clocks)
+            if (weak.TryGetTarget(out AnimationClock? clock))
+            {
+                if (pause)
+                    clock.Controller?.Pause();
+                else
+                    clock.Controller?.Resume();
+            }
     }
     private static bool Springs(Button button) => button.Style != button.TryFindResource("Plain") as Style && button.Focusable && button.IsEnabled;
     private static (ScaleTransform Scale, RotateTransform Rotate) Transforms(UIElement element)

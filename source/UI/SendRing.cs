@@ -358,15 +358,15 @@ internal sealed class SendRing
         waves.Draw(0, 0);
         if (Motion.On)
         {
-            loops.Add(Motion.Loop(tick, TranslateTransform.XProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever }));
+            loops.Add(Motion.Unpaused(tick, TranslateTransform.XProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever }));
             DoubleAnimation grow = new(0.45, 1.25, TimeSpan.FromSeconds(2.8))
             {
                 EasingFunction = Bezier.Ripple,
                 RepeatBehavior = RepeatBehavior.Forever
             };
-            loops.Add(Motion.Loop(spread, ScaleTransform.ScaleXProperty, grow));
-            loops.Add(Motion.Loop(spread, ScaleTransform.ScaleYProperty, grow.Clone()));
-            loops.Add(Motion.Loop(ripple, UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(2.8), RepeatBehavior = RepeatBehavior.Forever, KeyFrames = { new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)), new LinearDoubleKeyFrame(0.5, KeyTime.FromPercent(0.15)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } }));
+            loops.Add(Motion.Unpaused(spread, ScaleTransform.ScaleXProperty, grow));
+            loops.Add(Motion.Unpaused(spread, ScaleTransform.ScaleYProperty, grow.Clone()));
+            loops.Add(Motion.Unpaused(ripple, UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(2.8), RepeatBehavior = RepeatBehavior.Forever, KeyFrames = { new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)), new LinearDoubleKeyFrame(0.5, KeyTime.FromPercent(0.15)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } }));
             // The ring pops open from the pointer.
             ScaleTransform pop = new(0.86, 0.86);
             stage.RenderTransformOrigin = new(0.5, 0.5);
@@ -536,7 +536,7 @@ internal sealed class SendRing
                 RepeatBehavior = RepeatBehavior.Forever,
                 EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
             };
-            Action x = Motion.Loop(pulse, ScaleTransform.ScaleXProperty, beat), y = Motion.Loop(pulse, ScaleTransform.ScaleYProperty, beat.Clone());
+            Action x = Motion.Unpaused(pulse, ScaleTransform.ScaleXProperty, beat), y = Motion.Unpaused(pulse, ScaleTransform.ScaleYProperty, beat.Clone());
             breathing = () => { x(); y(); };
             loops.Add(breathing);
         }

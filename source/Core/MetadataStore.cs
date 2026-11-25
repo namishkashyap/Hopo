@@ -55,6 +55,13 @@ public sealed class MetadataStore
     private readonly IAtomicWriter writer;
     private readonly string filename;
     private Document data;
+    // Saves are combined and written by one background writer, so callers (clicks, transfers, device checks) never wait for the disk.
+    private bool dirty, writing, stale;
+    private Task writes = Task.CompletedTask;
+    // One store per folder at a time: opening the folder again first finishes the previous store's pending write.
+    private static readonly Dictionary<string, WeakReference<MetadataStore>> opened = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>A background save failed (disk full, permissions); the data stays in memory and the next save tries again.</summary>
+    public event Action<Exception>? SaveFailed;
     public string? RecoveryNotice
     {
         get;
@@ -68,6 +75,12 @@ public sealed class MetadataStore
     {
         this.writer = writer ?? new AtomicDiskWriter();
         Root = Path.GetFullPath(root);
+        lock (opened)
+        {
+            if (opened.TryGetValue(Root, out WeakReference<MetadataStore>? previous) && previous.TryGetTarget(out MetadataStore? earlier))
+                earlier.Flush();
+            opened[Root] = new(this);
+        }
         Directory.CreateDirectory(Root);
         FileCatalog.CheckSafeDirectory(Root);
         RestrictToUser(Root);
@@ -103,7 +116,7 @@ public sealed class MetadataStore
             };
         }).ToList();
         if (interrupted)
-            Save();
+            Write();
     }
     private static Document Load(string path)
     {
@@ -342,8 +355,9 @@ public sealed class MetadataStore
                 BrowserUrl = browserUrl,
                 LastSeenUtc = DateTime.UtcNow
             };
+            // Kept in memory and written with the next save (or on Flush): a reply from a paired PC every few seconds is not worth a disk write.
+            stale = true;
         }
-        Save();
     }
     public void ForgetPeer(string fingerprint, bool block)
     {
@@ -390,6 +404,68 @@ public sealed class MetadataStore
     /// <summary>File rows kept per history record; the pages show at most 200 and the counts stay exact.</summary>
     public const int HistoryFiles = 200;
     private void Save()
+    {
+        // Work already off the UI thread (transfers, history, pairing, tests) writes at once, as before. A click on the UI thread
+        // (Favorite, Trust, Rename, theme, settings) hands the write to the background writer instead of waiting for the disk.
+        if (SynchronizationContext.Current == null)
+        {
+            lock (gate)
+                stale = false;
+            Write();
+            return;
+        }
+        lock (gate)
+        {
+            dirty = true;
+            stale = false;
+            if (writing)
+                return;
+            writing = true;
+            writes = Task.Run(WriteLoop);
+        }
+    }
+    private void WriteLoop()
+    {
+        while (true)
+        {
+            lock (gate)
+            {
+                if (!dirty)
+                {
+                    writing = false;
+                    return;
+                }
+                dirty = false;
+            }
+            try
+            {
+                Write();
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                SaveFailed?.Invoke(error);
+            }
+        }
+    }
+    /// <summary>Waits until everything changed so far is on disk (on exit, and before the folder is opened again).</summary>
+    public void Flush()
+    {
+        lock (gate)
+            if (stale)
+                Save();
+        while (true)
+        {
+            Task pending;
+            lock (gate)
+            {
+                if (!writing && !dirty)
+                    return;
+                pending = writes;
+            }
+            pending.Wait();
+        }
+    }
+    private void Write()
     {
         lock (writeGate)
         {

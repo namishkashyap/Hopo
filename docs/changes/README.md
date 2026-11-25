@@ -43,3 +43,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-24 | [hopo Android: accept from the notification, trusted PCs, delete transfers, bigger Home labels](2026-11-24-hopo-android-accept-trust.md) |
 | 2026-11-24 | [hopo Windows: waving send ring, sending without opening hopo, speed card on Home](2026-11-24-hopo-send-ring-waves-speed-card.md) |
 | 2026-11-24 | [hopo: the Text panel opens again after another panel](2026-11-24-hopo-text-panel-reopen.md) |
+| 2026-11-25 | [hopo Windows: fixes from the break test (lag, idle work, failed sends)](2026-11-25-hopo-stress-fixes.md) |
