@@ -1,25 +1,26 @@
-# Installing hopo 2.1
+# Installing hopo 2.6.8
 
-hopo runs on Windows, macOS and Linux. Phones need no app, because they use
+hopo runs on Windows, macOS, Linux and Android. Other phones (iPhone included) need no app, because they use
 the browser page. hopo was called Lantoss until 2.0.2; installing 2.1 replaces it and keeps your settings,
 pairings and history. Install hopo on every computer you want to share between,
 and keep them on the same trusted home Wi-Fi or Ethernet.
 
-Get the files from the **[v2.6.4 release](https://github.com/namishkashyap/Lantoss/releases/tag/v2.6.4)**.
+Get the files from the **[v2.6.8 release](https://github.com/namishkashyap/Lantoss/releases/tag/v2.6.8)**.
 The previous Windows-only version stays available as [v1.9.0](https://github.com/namishkashyap/Lantoss/releases/tag/v1.9.0).
 
 | Your computer | Download |
 |---|---|
-| Windows 10/11 (64-bit), people who share files | `hopo-Users-Setup-2.6.4-x64.msi` (or just `hopoUsers.exe`) |
-| Windows 10/11 (64-bit), the admin | `hopo-Admin-Setup-2.6.4-x64.msi` (or just `hopoAdmin.exe`) |
-| Mac with Apple Silicon (M1 or later) | `hopo-2.6.4-macOS-AppleSilicon.zip` |
-| Mac with an Intel processor | `hopo-2.6.4-macOS-Intel.zip` |
-| Ubuntu, Debian, Linux Mint, Pop!_OS (64-bit PC) | `hopo_2.6.4_amd64.deb` |
-| Raspberry Pi OS or other Debian-based ARM64 | `hopo_2.6.4_arm64.deb` |
-| Any other Linux (Fedora, Arch, openSUSE…) | `hopo-2.6.4-linux-x64.tar.gz` or `hopo-2.6.4-linux-arm64.tar.gz` |
+| Windows 10/11 (64-bit), people who share files | `hopo-Users-Setup-2.6.8-x64.msi` (or just `hopoUsers.exe`) |
+| Windows 10/11 (64-bit), the admin | `hopo-Admin-Setup-2.6.8-x64.msi` (or just `hopoAdmin.exe`) |
+| Mac with Apple Silicon (M1 or later) | `hopo-2.6.8-macOS-AppleSilicon.zip` |
+| Mac with an Intel processor | `hopo-2.6.8-macOS-Intel.zip` |
+| Ubuntu, Debian, Linux Mint, Pop!_OS (64-bit PC) | `hopo_2.6.8_amd64.deb` |
+| Raspberry Pi OS or other Debian-based ARM64 | `hopo_2.6.8_arm64.deb` |
+| Any other Linux (Fedora, Arch, openSUSE…) | `hopo-2.6.8-linux-x64.tar.gz` or `hopo-2.6.8-linux-arm64.tar.gz` |
+| Android 10 or later | `hopo-2.6.8-android.apk` |
 
-These are development builds. They are not signed by Microsoft or notarized by
-Apple, so each system asks you to confirm the first launch, as described below.
+These are development builds. They are not signed by Microsoft, notarized by
+Apple or published on Google Play, so each system asks you to confirm the first launch, as described below.
 
 ---
 
@@ -27,8 +28,8 @@ Apple, so each system asks you to confirm the first launch, as described below.
 
 ### Install
 hopo comes as two separate apps. Give each person only the one they need:
-- **hopo Users** (`hopo-Users-Setup-2.6.4-x64.msi`): Home, Send files, Text & links and Transfers.
-- **hopo Admin** (`hopo-Admin-Setup-2.6.4-x64.msi`): every page, including Devices, shared folders, Sync, History and Settings.
+- **hopo Users** (`hopo-Users-Setup-2.6.8-x64.msi`): Home, Send files, Text & links and Transfers.
+- **hopo Admin** (`hopo-Admin-Setup-2.6.8-x64.msi`): every page, including Devices, shared folders, Sync, History and Settings.
 
 `hopoUsers.exe` and `hopoAdmin.exe` from the release also run on their own without installing.
 
@@ -69,9 +70,9 @@ Requires macOS 14 Sonoma or later.
    - Terminal users can instead run `sh install.sh` in the unpacked folder.
 
    **Saw "Lantoss is damaged and can't be opened" with the 2.0.0 download?** That build wasn't sealed.
-   Click **Cancel** (not Move to Bin), download 2.6.4, and do step 3.
+   Click **Cancel** (not Move to Bin), download 2.6.8, and do step 3.
    Or run this in Terminal, adjusting the path to where you unpacked it:
-   `xattr -cr ~/Downloads/hopo-2.6.4-macOS-AppleSilicon/hopo.app`.
+   `xattr -cr ~/Downloads/hopo-2.6.8-macOS-AppleSilicon/hopo.app`.
 
    <details><summary>Prefer to do it by hand?</summary>
 
@@ -104,15 +105,15 @@ hopo needs a desktop session (X11 or Wayland with XWayland).
 
 ### Debian, Ubuntu and derivatives (.deb)
 ```sh
-sudo apt install ./hopo_2.6.4_amd64.deb      # or hopo_2.6.4_arm64.deb
+sudo apt install ./hopo_2.6.8_amd64.deb      # or hopo_2.6.8_arm64.deb
 ```
 Then start **hopo** from your applications menu, or run `hopo`.
 Uninstall with `sudo apt remove hopo`.
 
 ### Any distribution (.tar.gz)
 ```sh
-tar -xzf hopo-2.6.4-linux-x64.tar.gz
-cd hopo-2.6.4
+tar -xzf hopo-2.6.8-linux-x64.tar.gz
+cd hopo-2.6.8
 ./install.sh            # installs for your user: ~/.local/opt/hopo and a menu entry
 # sudo ./install.sh     # or system-wide into /opt/hopo
 ```
@@ -129,6 +130,29 @@ Uninstall with `./uninstall.sh` (or `sudo ./uninstall.sh` for a system-wide inst
 - **Notifications** use `notify-send`, which most desktops include (package `libnotify-bin`).
 - **Tray icon** needs a desktop with status-icon support (GNOME needs the AppIndicator extension).
   Without one, closing the window minimizes hopo instead.
+
+---
+
+## Android
+
+Requires Android 10 or later.
+
+### Install
+1. On the phone, open the [v2.6.8 release](https://github.com/namishkashyap/Lantoss/releases/tag/v2.6.8) in Chrome and tap `hopo-2.6.8-android.apk`.
+   If Chrome warns about the file type, tap **Download anyway**.
+2. Tap **Open** when the download finishes (or open it from **Files → Downloads**).
+3. If Android blocks installing from this source, tap **Settings**, turn on **Allow from this source**, and go back.
+4. Tap **Install**. If Google Play Protect warns, tap **More details → Install anyway**.
+5. Open hopo and allow **notifications**, so incoming files can be accepted from the notification.
+
+### First run
+- Use the same Wi-Fi as your computers; they appear on Home. Tap one → **Connect** and compare the code on both screens.
+- If a computer is not found, use the menu → **Devices → Manual connection** with the address shown on the computer.
+- Received files are saved in **Downloads/hopo**.
+
+### Update or uninstall
+- Install a newer APK over the old one; pairings are kept.
+- Press and hold the hopo icon → **Uninstall**. Files in Downloads/hopo stay.
 
 ---
 
