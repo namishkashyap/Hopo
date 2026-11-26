@@ -199,6 +199,15 @@ More detail on every platform, including firewall and uninstall steps, is in **[
 
 ---
 
+## Testing and roadmap
+
+Every version is tested before release: automated checks, screen checks, a break test, a freeze probe, and hand tests on a real phone and PC. The results are published:
+
+- **[docs/TESTING.md](docs/TESTING.md):** how hopo is tested, and a version-by-version log of what was tested, measured, broken and fixed.
+- **[ROADMAP.md](ROADMAP.md#next-versions):** what comes next for more reliable and faster transfers that stay light on the PC.
+
+---
+
 ## Questions
 
 - **Does it need the internet?** No. Your devices only need to be on the same network.
