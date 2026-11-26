@@ -26,9 +26,15 @@ internal sealed class DevicesPage : IPage
             C.Space(C.Text("Discovery uses mDNS and LAN broadcast, and a new device is approved once on both screens. Paired devices reconnect automatically.", 12, "Muted"), 6), C.Space(status, 22), list,
             OperatingSystem.IsAndroid() ? new Panel() : C.Space(C.Note("Using your phone?", "Open Phone & browser in the menu and scan its QR code. Phones use the browser page, so no app is needed.", "phone"), 0, 20));
     }
+    private string shown = "";
     public void Refresh()
     {
         status.Text = app.Engine.DiscoveryStatus;
+        // The cards are rebuilt only when what they show changed, so buttons are not replaced under a finger every few seconds.
+        string key = string.Join("\n", app.Engine.Peers.Select(p => string.Join('|', p.Fingerprint, p.Name, p.Address, p.Port, p.Online, p.Paired, p.Blocked, p.Trusted, p.Favorite, p.SupportsQuickPair, p.LastSeenUtc.ToString("yyyyMMddHHmm")))) + app.Search + Theme.Dark + app.Engine.DiscoveryStatus;
+        if (key == shown && list.Children.Count > 0)
+            return;
+        shown = key;
         list.Children.Clear();
         Peer[] peers = app.Engine.Peers.Where(p => p.Name.Contains(app.Search, StringComparison.OrdinalIgnoreCase)).ToArray();
         int paired = peers.Count(p => p.Paired && !p.Blocked);

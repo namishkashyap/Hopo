@@ -107,6 +107,16 @@ internal static class C
         }
         return panel;
     }
+    /// <summary>
+    /// On a phone, keeps a drawn copy of <paramref name="visual"/> and reuses it while the rings move around it, instead of drawing its
+    /// blurred glow and gradients again every frame (Avalonia redraws it whenever anything near it changes).
+    /// </summary>
+    public static T Cached<T>(T visual) where T : Visual
+    {
+        if (OperatingSystem.IsAndroid())
+            visual.CacheMode = new BitmapCache();
+        return visual;
+    }
     public static T Space<T>(T control, double bottom = 16, double top = 0) where T : Control
     {
         control.Margin = new(control.Margin.Left, top, control.Margin.Right, bottom);

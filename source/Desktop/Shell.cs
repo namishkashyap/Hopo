@@ -181,7 +181,7 @@ internal sealed class Shell : IDisposable
         Engine.Completed += record => Ui(() =>
         {
             if (Store.Preferences.Notifications)
-                Notify(record.Direction == "Received" ? "Files received" : "Transfer finished", $"{record.FileCount} files · {record.PeerName}");
+                Notify(record.Direction == "Received" ? "Files received" : "Transfer finished", $"{Format.Count(record.FileCount, "file")} · {record.PeerName}");
         });
         Root.KeyDown += (_, e) =>
         {
@@ -354,11 +354,11 @@ internal sealed class Shell : IDisposable
         Window.Background = Theme.Brush("Background");
 #endif
         // The hopo field behind every page: a purple glow top-left, a green glow bottom-right and faint rings centred on the window.
-        Panel field = new()
+        Panel field = C.Cached(new Panel()
         {
             IsHitTestVisible = false,
             ClipToBounds = true
-        };
+        });
         // Each glow is the design's 1.25 W × 1.35 H ellipse (purple at −.40 W, −.55 H; green mirrored bottom-right), drawn by a window-relative brush so it follows every resize.
         // They drift slowly: purple to (-14%, 10%) at 95% over 60 s, green to (18%, 12%) at 110% over 68 s, as shares of the glow.
         RadialGradientBrush violet = (RadialGradientBrush)Theme.Glow(Theme.Dark ? "#8C3CFF" : "#8F5BFF", Theme.Dark ? 0.52 : 0.42, 0.225, 0.125, 0.625, 0.675), green = (RadialGradientBrush)Theme.Glow(Theme.Dark ? "#28F096" : "#24C98A", Theme.Dark ? 0.4 : 0.36, 0.775, 0.875, 0.625, 0.675);
@@ -480,6 +480,8 @@ internal sealed class Shell : IDisposable
         Back.Clear();
         Root.Children.Clear();
         Root.Children.AddRange([field, main, menu, overlays]);
+        // Any touch or click wakes motion that settled while the phone lay untouched.
+        Root.AddHandler(InputElement.PointerPressedEvent, (_, _) => Motion.Wake(), Avalonia.Interactivity.RoutingStrategies.Tunnel, true);
         mainLayer = main;
         Inset(safeArea);
     }
@@ -794,11 +796,14 @@ internal sealed class Shell : IDisposable
 #if ANDROID
         // Android hands out documents, not paths: each is copied into the app's cache first.
         List<string> copied = [];
-        if (files.Count > 0)
-            Tell("Preparing " + files.Count + (files.Count == 1 ? " file…" : " files…"));
-        foreach (IStorageFile file in files)
-            if (ImportHook != null && await ImportHook(file) is string path)
+        for (int i = 0; i < files.Count; i++)
+        {
+            Tell(files.Count == 1 ? "Preparing " + files[i].Name + "…" : $"Preparing file {i + 1} of {files.Count}: {files[i].Name}…");
+            if (ImportHook != null && await ImportHook(files[i]) is string path)
                 copied.Add(path);
+        }
+        if (copied.Count < files.Count)
+            Tell($"{files.Count - copied.Count} of {files.Count} files could not be read and were left out.");
         return [.. copied];
 #else
         return files.Select(file => file.TryGetLocalPath()).OfType<string>().ToArray();
@@ -850,7 +855,7 @@ internal sealed class Shell : IDisposable
                 RefreshPage();
             else
                 Navigate("Send");
-            Tell($"{manifest.FileCount} files and {manifest.FolderCount} folders ready. Select a paired recipient." + (leftOut.Count == 0 ? "" : $" {leftOut.Count} {(leftOut.Count == 1 ? "item" : "items")} will not be sent: " + string.Join("; ", leftOut.Take(3)) + (leftOut.Count > 3 ? "; …" : "") + "."));
+            Tell($"{Format.Count(manifest.FileCount, "file")} and {Format.Count(manifest.FolderCount, "folder")} ready. Select a paired recipient." + (leftOut.Count == 0 ? "" : $" {leftOut.Count} {(leftOut.Count == 1 ? "item" : "items")} will not be sent: " + string.Join("; ", leftOut.Take(3)) + (leftOut.Count > 3 ? "; …" : "") + "."));
         }
         catch (Exception error) { Error(error); }
         finally { selecting = false; }
@@ -930,7 +935,7 @@ internal sealed class Shell : IDisposable
             return;
 #endif
         if (Store.Preferences.Notifications)
-            Notify(request.PeerName + " wants to send you files", $"{request.Manifest.Entries.Count} files · {Format.Bytes(request.Manifest.TotalBytes)}" + (request.Address.Length > 0 ? " · " + request.Address : ""));
+            Notify(request.PeerName + " wants to send you files", $"{Format.Count(request.Manifest.FileCount, "file")} · {Format.Bytes(request.Manifest.TotalBytes)}" + (request.Address.Length > 0 ? " · " + request.Address : ""));
     }
 #if !ANDROID
     private void CreateTray()

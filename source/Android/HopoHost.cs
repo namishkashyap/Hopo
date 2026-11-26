@@ -75,8 +75,12 @@ internal static class HopoHost
         {
             string folder = NewBatch(), path = Path.Combine(folder, SafeName(file.Name));
             await using Stream source = await file.OpenReadAsync();
-            await using FileStream target = File.Create(path);
-            await source.CopyToAsync(target);
+            // Copied on a worker thread with a 1 MB buffer: Android's document streams read synchronously, which froze the screen for large videos.
+            await Task.Run(async () =>
+            {
+                await using FileStream target = new(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await source.CopyToAsync(target, 1 << 20);
+            });
             return path;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or Java.Lang.Exception) { return null; }

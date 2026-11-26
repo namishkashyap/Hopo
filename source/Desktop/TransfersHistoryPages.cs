@@ -13,6 +13,7 @@ internal sealed class TransfersPage : IPage
     private readonly Dictionary<string, TransferRow> cards = [];
     private readonly Dictionary<string, Button> filters = [];
     private string filter = "All", layoutKey = "";
+    private string shownPills = "";
     public Control View
     {
         get;
@@ -34,7 +35,9 @@ internal sealed class TransfersPage : IPage
     public void Refresh()
     {
         TransferRecord[] all = app.Engine.Transfers.Records.ToArray();
-        foreach ((string name, Button button) in filters)
+        // The filter pills are restyled only when the chosen filter or a count changes, not on every progress refresh.
+        string pills = filter + "|" + all.Count(record => !record.Terminal && record.State != TransferState.Queued) + "|" + all.Count(record => record.State == TransferState.Queued) + "|" + Theme.Dark;
+        foreach ((string name, Button button) in pills == shownPills ? Enumerable.Empty<KeyValuePair<string, Button>>() : filters)
         {
             // Filter pills: the chosen one carries the amber tint; Active and Queued show their counts.
             int count = name is "Active" or "Queued" ? all.Count(record => name == "Active" ? !record.Terminal && record.State != TransferState.Queued : record.State == TransferState.Queued) : 0;
@@ -42,19 +45,27 @@ internal sealed class TransfersPage : IPage
             Theme.SetButton(button.Resources, name == filter ? "Accent/14" : "Glass", "Text", name == filter ? "Accent/45" : "GlassBorder", name == filter ? "Accent/20" : "Text/8");
         }
         TransferRecord[] records = app.Engine.Transfers.Records.Where(r => Matches(r) && (r.Title.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.PeerName.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.Files.Any(f => f.RelativePath.Contains(app.Search, StringComparison.OrdinalIgnoreCase)))).Take(100).ToArray();
+        shownPills = pills;
         string key = string.Join('|', records.Select(r => r.Id + r.Direction));
-        // Rebuild only when the set of jobs changes; progress updates reuse the existing cards.
+        // The list is rearranged only when the set of jobs changes; cards still listed are kept (new transfers get a new card) and
+        // progress updates reuse them.
         if (layoutKey != key || rows.Children.Count == 0)
         {
             layoutKey = key;
             rows.Children.Clear();
+            Dictionary<string, TransferRow> kept = [];
+            foreach (TransferRecord record in records)
+                if (cards.TryGetValue(record.Id + record.Direction, out TransferRow? existing))
+                    kept[record.Id + record.Direction] = existing;
             cards.Clear();
+            foreach ((string id, TransferRow existing) in kept)
+                cards[id] = existing;
             if (records.Length == 0)
                 rows.Children.Add(C.Empty("Nothing in this queue.", "Send files from the Send screen, or approve an incoming transfer. Active and finished jobs appear here.", "transfer", C.AsyncButton("Choose files", app.PickFilesAsync, icon: "plus")));
             foreach (TransferRecord record in records)
             {
-                TransferRow row = new(app, record);
-                cards[record.Id + record.Direction] = row;
+                if (!cards.TryGetValue(record.Id + record.Direction, out TransferRow? row))
+                    cards[record.Id + record.Direction] = row = new(app, record);
                 rows.Children.Add(C.Space(row.View, 14));
             }
         }
@@ -176,11 +187,20 @@ internal sealed class HistoryPage : IPage
         View = C.Stack(C.Header("Manage", "History", "What moved, and when. File contents are never stored.", C.Inline(C.AsyncButton("Export log", ExportAsync), C.AsyncButton("Clear finished", ClearAsync))), C.Card(list, 18),
             C.Space(C.Text("Search by file name, person or device at the top. Clearing history never deletes received files.", 11, "Muted"), 0, 12));
     }
+    private string shown = "";
     public void Refresh()
     {
-        list.Children.Clear();
         TransferRecord[] records = app.Engine.Transfers.Records.Where(r => r.Terminal && (r.Title.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.PeerName.Contains(app.Search, StringComparison.OrdinalIgnoreCase) || r.Files.Any(f => f.RelativePath.Contains(app.Search, StringComparison.OrdinalIgnoreCase)))).Take(100).ToArray();
-        list.Children.Add(Row(C.Eyebrow("File"), C.Eyebrow("Device"), C.Eyebrow("Direction"), C.Eyebrow("Size"), C.Eyebrow("Status"), C.Eyebrow("When"), new Panel()));
+        // Transfers report progress several times a second; History is rebuilt only when its finished transfers change.
+        string key = string.Join('|', records.Select(r => r.Id + r.Direction + r.State)) + "#" + app.Search + Theme.Dark;
+        if (key == shown && list.Children.Count > 0)
+            return;
+        shown = key;
+        list.Children.Clear();
+        // A phone is too narrow for the seven columns (the names and Delete were squeezed off screen): each entry is two lines there instead.
+        bool phone = OperatingSystem.IsAndroid();
+        if (!phone)
+            list.Children.Add(Row(C.Eyebrow("File"), C.Eyebrow("Device"), C.Eyebrow("Direction"), C.Eyebrow("Size"), C.Eyebrow("Status"), C.Eyebrow("When"), new Panel()));
         if (records.Length == 0)
             list.Children.Add(C.Space(C.Text("No matching history. Completed, declined, cancelled and failed transfers appear here.", 13, "Muted"), 12, 12));
         foreach (TransferRecord record in records)
@@ -190,9 +210,38 @@ internal sealed class HistoryPage : IPage
             TextBlock device = C.Text(record.PeerName + (record.PeerAddress.Length > 0 ? " · " + record.PeerAddress : ""), 12, "Muted");
             device.TextTrimming = TextTrimming.CharacterEllipsis;
             device.TextWrapping = TextWrapping.NoWrap;
-            Grid row = Row(C.Medium(record.Title, 13), device, C.Text(record.Direction, 12, "Muted"), C.Text(record.SizeText, 12, "Muted"), C.Badge(record.StatusText, color, color + "/14"), C.Text(record.CreatedUtc.ToLocalTime().ToString("dd MMM, HH:mm"), 12, "Muted"), C.Inline(reveal, C.IconButton("close", () => _ = TransferRow.DeleteAsync(app, record), "Delete from history", true)));
+            Control actions = C.Inline(reveal, C.IconButton("close", () => _ = TransferRow.DeleteAsync(app, record), "Delete from history", true));
+            if (phone)
+            {
+                list.Children.Add(new Border { BorderBrush = Theme.Brush("Text/6"), BorderThickness = new(0, 1, 0, 0), Padding = new(0, 10), Child = PhoneRow(record, color, actions) });
+                continue;
+            }
+            Grid row = Row(C.Medium(record.Title, 13), device, C.Text(record.Direction, 12, "Muted"), C.Text(record.SizeText, 12, "Muted"), C.Badge(record.StatusText, color, color + "/14"), C.Text(record.CreatedUtc.ToLocalTime().ToString("dd MMM, HH:mm"), 12, "Muted"), actions);
             list.Children.Add(new Border { BorderBrush = Theme.Brush("Text/6"), BorderThickness = new(0, 1, 0, 0), Child = row });
         }
+    }
+    private static Control PhoneRow(TransferRecord record, string color, Control actions)
+    {
+        TextBlock title = C.Medium(record.Title, 14), detail = C.Text(string.Join(" · ", new[] { record.Direction, record.PeerName, record.SizeText, record.CreatedUtc.ToLocalTime().ToString("dd MMM, HH:mm") }.Where(part => part.Length > 0)), 12, "Muted");
+        foreach (TextBlock text in new[] { title, detail })
+        {
+            text.TextTrimming = TextTrimming.CharacterEllipsis;
+            text.TextWrapping = TextWrapping.NoWrap;
+        }
+        Control badge = C.Badge(record.StatusText, color, color + "/14");
+        DockPanel top = new()
+        {
+            Margin = new(0, 0, 0, 6)
+        }, bottom = new();
+        DockPanel.SetDock(badge, Dock.Right);
+        DockPanel.SetDock(actions, Dock.Right);
+        badge.Margin = new(10, 0, 0, 0);
+        actions.VerticalAlignment = detail.VerticalAlignment = VerticalAlignment.Center;
+        top.Children.Add(badge);
+        top.Children.Add(title);
+        bottom.Children.Add(actions);
+        bottom.Children.Add(detail);
+        return C.Stack(top, bottom);
     }
     private static Grid Row(params Control[] cells)
     {
