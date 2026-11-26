@@ -794,11 +794,14 @@ internal sealed class Shell : IDisposable
 #if ANDROID
         // Android hands out documents, not paths: each is copied into the app's cache first.
         List<string> copied = [];
-        if (files.Count > 0)
-            Tell("Preparing " + files.Count + (files.Count == 1 ? " file…" : " files…"));
-        foreach (IStorageFile file in files)
-            if (ImportHook != null && await ImportHook(file) is string path)
+        for (int i = 0; i < files.Count; i++)
+        {
+            Tell(files.Count == 1 ? "Preparing " + files[i].Name + "…" : $"Preparing file {i + 1} of {files.Count}: {files[i].Name}…");
+            if (ImportHook != null && await ImportHook(files[i]) is string path)
                 copied.Add(path);
+        }
+        if (copied.Count < files.Count)
+            Tell($"{files.Count - copied.Count} of {files.Count} files could not be read and were left out.");
         return [.. copied];
 #else
         return files.Select(file => file.TryGetLocalPath()).OfType<string>().ToArray();
