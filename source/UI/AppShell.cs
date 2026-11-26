@@ -467,7 +467,7 @@ internal sealed class AppShell : IDisposable
         else if (shortcut != null)
             shortcut.Setting = setting;
         else
-            shortcut = new(setting, explorer => Ui(() => SendRing.Open(this, explorer)));
+            shortcut = new(setting, explorer => Ui(() => SendRing.Open(this, explorer)), key => Ui(() => SendRing.Key(key)));
     }
     /// <summary>A short message in the status line and, when notifications are on, from the tray.</summary>
     public void Notice(string title, string text)

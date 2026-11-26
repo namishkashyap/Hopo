@@ -1,3 +1,33 @@
+# Roadmap
+
+## Next versions
+
+These ideas come from testing hopo on real devices (see [docs/TESTING.md](docs/TESTING.md)). The aims: more reliable transfers, faster transfers, and keeping the PC light while files move. Each item says what we saw that led to it.
+
+### Faster transfers
+
+1. **Save received files straight into Downloads on the phone.** Today a file is written to hopo's private folder, then copied to Downloads/hopo, so every byte is written twice.
+2. **Send picked files directly.** A file chosen on the phone is copied into hopo's cache before it is sent, which doubles the wait and the storage used for big videos.
+3. **Use the phone's built-in encryption.** Phones have hardware-accelerated encryption. hopo's own encryption library still takes about one processor core for 10–14 MB/s on a Pixel 7a.
+4. **Pack many small files into one stream.** Each file costs about 5 ms today, so 10,000 photos take around 50 seconds even on a fast network.
+5. **Use parallel streams for big files on fast Wi-Fi** (5 GHz and Wi-Fi 6), where one stream can't fill the link.
+6. **Tell people when the phone is on 2.4 GHz Wi-Fi.** The test phone's 2.4 GHz link capped transfers near 14 MB/s. 5 GHz is usually several times faster.
+
+### More reliable
+
+7. **Resume from where it stopped.** After a Wi-Fi drop, a transfer starts again from the beginning. It could continue from the last file and block that was checked.
+8. **Retry automatically when Wi-Fi drops,** with a short wait between tries, instead of asking the sender to press Retry.
+9. **Find a PC whose port changed, right away.** When a PC moves to a different port, the phone can keep the old one and show the PC as offline until discovery catches up. When the saved port doesn't answer, hopo should try the usual port and ask the network again.
+10. **Tidy up duplicate devices.** When a PC gets a new key under the same name, the old entry stays as a second, offline device. hopo could offer to remove the old one.
+11. **Make Home use the space in landscape.** On a phone turned sideways, the Home ring becomes small.
+
+### Light on the PC
+
+12. **Run transfers at lower priority,** and limit how many run at once, so the PC stays smooth while large files move. The faster encryption in 2.6.9 already lowers the PC's processor use.
+13. **Clean up old firewall rules when installing,** and never add one for Public networks. Test PCs had dozens of leftover rules from older versions, and one allowed hopo on Public networks.
+
+---
+
 # Delivery status
 
 ## Local sharing improvements in 1.9

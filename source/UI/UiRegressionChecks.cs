@@ -210,10 +210,10 @@ internal static class UiRegressionChecks
         string sample = Path.Combine(output, "ring-sample.txt");
         File.WriteAllText(sample, new string('x', 2048));
         FrameworkElement ring = SendRing.Preview(app, [sample, output]);
-        ring.Measure(new(360, 360));
-        ring.Arrange(new Rect(0, 0, 360, 360));
+        ring.Measure(new(312, 312));
+        ring.Arrange(new Rect(0, 0, 312, 312));
         ring.UpdateLayout();
-        RenderTargetBitmap ringShot = new(360, 360, 96, 96, PixelFormats.Pbgra32);
+        RenderTargetBitmap ringShot = new(312, 312, 96, 96, PixelFormats.Pbgra32);
         ringShot.Render(ring);
         PngBitmapEncoder ringFile = new();
         ringFile.Frames.Add(BitmapFrame.Create(ringShot));
