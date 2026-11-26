@@ -552,12 +552,48 @@ internal sealed class HomePage : IPage
             Open(null);
         }, true);
         send.HorizontalAlignment = HorizontalAlignment.Stretch;
-        string shown = "";
+        string shown = "", listed = "-";
+        // Every chosen file is listed with its own remove button; a long list scrolls inside the panel.
+        StackPanel list = new()
+        {
+            Spacing = 2
+        };
+        Button clear = C.Ghost(C.Small("Clear", () => { app.Selection.Clear(); app.Tell("Selection cleared."); fillSheet?.Invoke(); }));
+        clear.HorizontalAlignment = HorizontalAlignment.Right;
+        StackPanel chosenFiles = C.Stack(new ScrollViewer { MaxHeight = 190, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Content = list }, C.Space(clear, 0, 4));
+        chosenFiles.Margin = new(0, 10, 0, 0);
         fillSheet = () =>
         {
             int files = app.Selection.Sum(item => item.Files);
-            summary.Text = app.Selection.Count == 0 ? "Drop files here" : string.Join(", ", app.Selection.Take(2).Select(item => item.Name)) + (app.Selection.Count > 2 ? $" +{app.Selection.Count - 2}" : "") + $" · {files} file{(files == 1 ? "" : "s")} · {Format.Bytes(app.Selection.Sum(item => item.Size))}";
+            summary.Text = app.Selection.Count == 0 ? (OperatingSystem.IsAndroid() ? "No files chosen" : "Drop files here") : $"{Format.Count(files, "file")} · {Format.Bytes(app.Selection.Sum(item => item.Size))}";
             summary.Foreground = Theme.Brush(app.Selection.Count == 0 ? "Muted" : "Text");
+            string nextList = string.Join("|", app.Selection.Select(item => item.Path));
+            if (nextList != listed)
+            {
+                listed = nextList;
+                list.Children.Clear();
+                chosenFiles.IsVisible = app.Selection.Count > 0;
+                foreach (SelectionItem item in app.Selection.ToArray())
+                {
+                    Button remove = C.IconButton("close", () => { app.Selection.Remove(item); app.Tell(item.Name + " removed. " + Format.Count(app.Selection.Sum(s => s.Files), "file") + " left to send."); fillSheet?.Invoke(); }, "Remove " + item.Name, true);
+                    TextBlock name = C.Medium(item.Name, 13);
+                    name.TextTrimming = TextTrimming.CharacterEllipsis;
+                    StackPanel text = C.Stack(name, C.Text(item.Detail, 11, "Muted"));
+                    text.VerticalAlignment = VerticalAlignment.Center;
+                    Border tile = C.Tile(item.Folders > 0 ? "folder" : "file", item.Folders > 0 ? "Primary" : "Mint", 32);
+                    tile.Margin = new(0, 0, 10, 0);
+                    DockPanel row = new()
+                    {
+                        Margin = new(0, 2)
+                    };
+                    DockPanel.SetDock(tile, Dock.Left);
+                    DockPanel.SetDock(remove, Dock.Right);
+                    row.Children.Add(tile);
+                    row.Children.Add(remove);
+                    row.Children.Add(text);
+                    list.Children.Add(row);
+                }
+            }
             Target[] all = Targets();
             Target? chosen = Chosen(all);
             send.IsEnabled = app.Selection.Count > 0 && chosen != null;
@@ -577,7 +613,7 @@ internal sealed class HomePage : IPage
                     fillSheet?.Invoke();
                 }));
         };
-        return Sheet("Send files", Drop(summary, C.AsyncButton("Choose files", async () => await app.AddSelectionsAsync(await app.PickFilesAsync("Choose files to send"), true), icon: "plus")), Labelled("Send to", targets), send);
+        return Sheet("Send files", Drop(summary, C.AsyncButton("Choose files", async () => await app.AddSelectionsAsync(await app.PickFilesAsync("Choose files to send"), true), icon: "plus")), chosenFiles, Labelled("Send to", targets), send);
     }
     private StackPanel FolderSheet()
     {
