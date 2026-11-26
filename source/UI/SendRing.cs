@@ -16,14 +16,16 @@ internal sealed class ShortcutWatcher : IDisposable
 {
     private const int KeyboardHook = 13, KeyDown = 0x100, SystemKeyDown = 0x104, Quit = 0x12;
     private readonly Action<IntPtr> pressed;
+    private readonly Action<int> ringKey;
     private readonly ManualResetEvent stop = new(false);
     private readonly HookProc callback;
     private volatile string setting;
     private int thread;
-    public ShortcutWatcher(string setting, Action<IntPtr> pressed)
+    public ShortcutWatcher(string setting, Action<IntPtr> pressed, Action<int> ringKey)
     {
         this.setting = setting;
         this.pressed = pressed;
+        this.ringKey = ringKey;
         callback = Hook;
         new Thread(Run) { IsBackground = true, Name = "hopo send shortcut" }.Start();
     }
@@ -60,6 +62,12 @@ internal sealed class ShortcutWatcher : IDisposable
     }
     private IntPtr Hook(int code, IntPtr message, IntPtr data)
     {
+        // While the ring is open, Escape closes it and 1–9 send, wherever the keyboard focus is.
+        if (code >= 0 && SendRing.Showing && (message == KeyDown || message == SystemKeyDown) && Marshal.ReadInt32(data) is int key && (key == 0x1B || key is >= 0x31 and <= 0x39 || key is >= 0x61 and <= 0x69))
+        {
+            ringKey(key);
+            return 1;
+        }
         // Only S is looked at; the window checks are a few quick system calls.
         if (code >= 0 && (message == KeyDown || message == SystemKeyDown) && Marshal.ReadInt32(data) == 0x53 && Opens(out IntPtr window))
         {
@@ -235,12 +243,17 @@ internal static class ExplorerSelection
 /// <summary>The device ring: a round window at the mouse pointer with the connected PCs and phones around it. The receiver still approves every send.</summary>
 internal sealed class SendRing
 {
-    // Smaller than Home: the rings sit at 124 px, with room for a device and its name below the bottom one.
-    private const double Size = 360, Middle = Size / 2, Orbit = 124;
+    // A 312 px circle: Home's waves as a faint border round its edge, the devices on a quiet inner orbit, the selection in the middle.
+    private const double Size = 312, Middle = Size / 2, Orbit = 98, Badge = 40;
     // The Home ring colours: each device gets its own.
     private static readonly Color[] Palette = [.. new[] { "#B57CFF", "#3FE0FF", "#3DF5A0", "#FF6AD5", "#F5B54A", "#6FB7FF", "#FF8A80", "#5CF0D0" }.Select(hex => (Color)ColorConverter.ConvertFromString(hex))];
-    private static Window? open;
+    private static SendRing? current;
     private static bool opening;
+    /// <summary>
+    /// The ring is on screen. The shortcut's keyboard hook (on its own thread) then hands Escape and 1–9 to the ring, so they work even
+    /// when Windows did not give the ring the keyboard focus.
+    /// </summary>
+    public static volatile bool Showing;
     // Endless motion in the ring, stopped when it closes.
     private readonly List<Action> loops = [];
     private readonly AppShell app;
@@ -248,14 +261,15 @@ internal sealed class SendRing
     private readonly List<(string Name, Peer? Peer, BrowserDevice? Phone)> targets = [];
     private readonly List<Button> buttons = [];
     private readonly Window window;
+    private readonly Canvas stage, cover = new();
     private bool closing;
     // Explorer or the desktop gets the focus back when the ring closes, so hopo's own window never comes forward.
     private IntPtr returnTo;
-    // The Home rings, smaller, on the same 30 fps clock.
-    private readonly WaveRings waves = new(Size, Orbit / 284, 0.6, 0.9, 2.5, 6);
+    // Home's waves round the edge of the circle (radius about 148 px), lower and thinner than on Home, on the 30 fps clock.
+    private readonly WaveRings waves = new(Size, 148.0 / 284, 0.4, 0.7, 2, 0);
     private readonly TranslateTransform tick = new();
     private readonly System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-    private SendRing(AppShell app, string[] paths)
+    private SendRing(AppShell app, string[] paths, bool preview = false)
     {
         this.app = app;
         this.paths = paths;
@@ -274,29 +288,48 @@ internal sealed class SendRing
             Topmost = true,
             Width = Size,
             Height = Size,
-            Opacity = 0,
             FontFamily = app.Window.FontFamily
         };
         // The ring uses the main window's colours and styles, so it follows Light, Dark and contrast themes.
         foreach (object key in app.Window.Resources.Keys)
             window.Resources[key] = app.Window.Resources[key];
-        window.Content = Build();
+        stage = Build();
+        if (!preview)
+        {
+            // The window covers the screen the ring opens on with an almost invisible layer (1/255 opaque, so it still receives clicks):
+            // a click anywhere outside the circle closes the ring, whether or not Windows gave the ring the focus.
+            cover.Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
+            // Only the circle fades in; the layer itself is there (and catches clicks) from the first moment.
+            stage.Opacity = 0;
+            cover.Children.Add(stage);
+            cover.MouseDown += (_, e) =>
+            {
+                if (e.OriginalSource == cover)
+                    Close(true);
+            };
+            window.Content = cover;
+        }
+        else
+            window.Content = stage;
         window.KeyDown += Pressed;
         window.Deactivated += (_, _) => Close(false);
         window.Closed += (_, _) =>
         {
             foreach (Action stop in loops)
                 stop();
-            if (open == window)
-                open = null;
+            if (current == this)
+            {
+                current = null;
+                Showing = false;
+            }
         };
     }
     /// <summary>The ring's content for the preview screenshot checks, without showing it or reading Explorer.</summary>
-    public static FrameworkElement Preview(AppShell app, string[] paths) => (FrameworkElement)new SendRing(app, paths).window.Content;
+    public static FrameworkElement Preview(AppShell app, string[] paths) => new SendRing(app, paths, true).stage;
     /// <summary>Opens the ring for the selection in <paramref name="explorer"/> (an Explorer window or the desktop). Nothing selected: nothing opens.</summary>
     public static async void Open(AppShell app, IntPtr explorer)
     {
-        if (open != null || opening)
+        if (current != null || opening)
             return;
         opening = true;
         string[] paths;
@@ -316,8 +349,20 @@ internal sealed class SendRing
         {
             returnTo = explorer
         };
-        open = ring.window;
+        current = ring;
+        Showing = true;
         ring.Show();
+    }
+    /// <summary>A key caught by the shortcut's keyboard hook while the ring is open: Escape closes it, 1–9 send to that device.</summary>
+    public static void Key(int virtualKey)
+    {
+        if (current is not { } ring)
+            return;
+        int number = virtualKey is >= 0x31 and <= 0x39 ? virtualKey - 0x31 : virtualKey is >= 0x61 and <= 0x69 ? virtualKey - 0x61 : -1;
+        if (virtualKey == 0x1B)
+            ring.Close(true);
+        else if (number >= 0 && number < ring.targets.Count)
+            ring.Send(number);
     }
     private Canvas Build()
     {
@@ -335,43 +380,61 @@ internal sealed class SendRing
         plate.SetResourceReference(Shape.FillProperty, "Menu");
         plate.SetResourceReference(Shape.StrokeProperty, "GlassEdge");
         Place(stage, plate, 4, 4);
-        // A soft violet haze in the middle and a ripple that grows out of it every few seconds.
-        Ellipse haze = Glow(Palette[0], 210, 0.35);
-        Place(stage, haze, Middle - 105, Middle - 105);
-        ScaleTransform spread = new(0.45, 0.45);
+        // A faint violet haze in the middle and a soft ripple that grows out of it every few seconds.
+        Place(stage, Glow(Palette[0], 180, 0.18), Middle - 90, Middle - 90);
+        ScaleTransform spread = new(0.5, 0.5);
         Ellipse ripple = new()
         {
-            Width = 180,
-            Height = 180,
-            StrokeThickness = 1.5,
+            Width = 150,
+            Height = 150,
+            StrokeThickness = 1,
             Stroke = new SolidColorBrush(Palette[1]),
             Opacity = 0,
             IsHitTestVisible = false,
             RenderTransformOrigin = new(0.5, 0.5),
             RenderTransform = spread
         };
-        Place(stage, ripple, Middle - 90, Middle - 90);
-        // Home's waving rings, spinning and morphing twice as fast as on Home so the motion reads at this size.
-        stage.Children.Add(waves.Glow);
-        stage.Children.Add(waves.Lines);
-        tick.Changed += (_, _) => waves.Draw(watch.Elapsed.TotalSeconds * 2, 0);
+        Place(stage, ripple, Middle - 75, Middle - 75);
+        // The waves are the circle's border: thin, low and faint.
+        Grid border = new()
+        {
+            Width = Size,
+            Height = Size,
+            Opacity = 0.45,
+            IsHitTestVisible = false
+        };
+        border.Children.Add(waves.Glow);
+        border.Children.Add(waves.Lines);
+        Place(stage, border, 0, 0);
+        tick.Changed += (_, _) => waves.Draw(watch.Elapsed.TotalSeconds * 1.5, 0);
         waves.Draw(0, 0);
+        // The devices' orbit: a quiet guide line.
+        Ellipse orbit = new()
+        {
+            Width = Orbit * 2,
+            Height = Orbit * 2,
+            StrokeThickness = 1,
+            Opacity = 0.55,
+            IsHitTestVisible = false
+        };
+        orbit.SetResourceReference(Shape.StrokeProperty, "GlassBorder");
+        Place(stage, orbit, Middle - Orbit, Middle - Orbit);
         if (Motion.On)
         {
             loops.Add(Motion.Unpaused(tick, TranslateTransform.XProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever }));
-            DoubleAnimation grow = new(0.45, 1.25, TimeSpan.FromSeconds(2.8))
+            DoubleAnimation grow = new(0.5, 1.15, TimeSpan.FromSeconds(3.2))
             {
                 EasingFunction = Bezier.Ripple,
                 RepeatBehavior = RepeatBehavior.Forever
             };
             loops.Add(Motion.Unpaused(spread, ScaleTransform.ScaleXProperty, grow));
             loops.Add(Motion.Unpaused(spread, ScaleTransform.ScaleYProperty, grow.Clone()));
-            loops.Add(Motion.Unpaused(ripple, UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(2.8), RepeatBehavior = RepeatBehavior.Forever, KeyFrames = { new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)), new LinearDoubleKeyFrame(0.5, KeyTime.FromPercent(0.15)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } }));
+            loops.Add(Motion.Unpaused(ripple, UIElement.OpacityProperty, new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(3.2), RepeatBehavior = RepeatBehavior.Forever, KeyFrames = { new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)), new LinearDoubleKeyFrame(0.3, KeyTime.FromPercent(0.15)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) } }));
             // The ring pops open from the pointer.
-            ScaleTransform pop = new(0.86, 0.86);
+            ScaleTransform pop = new(0.88, 0.88);
             stage.RenderTransformOrigin = new(0.5, 0.5);
             stage.RenderTransform = pop;
-            DoubleAnimation popIn = new(0.86, 1, TimeSpan.FromSeconds(0.38))
+            DoubleAnimation popIn = new(0.88, 1, TimeSpan.FromSeconds(0.32))
             {
                 EasingFunction = Bezier.Pop
             };
@@ -380,35 +443,35 @@ internal sealed class SendRing
         }
         int files = paths.Count(File.Exists), folders = paths.Length - files;
         long bytes = paths.Where(File.Exists).Sum(path => new FileInfo(path).Length);
-        string what = string.Join(", ", new[] { files > 0 ? files + (files == 1 ? " file" : " files") : "", folders > 0 ? folders + (folders == 1 ? " folder" : " folders") : "" }.Where(part => part.Length > 0));
-        TextBlock title = C.Text("Send " + what, 13, bold: true), detail = C.Text(files > 0 ? Amount(bytes) + (folders > 0 ? " plus folders" : "") : "Folder contents are counted when sent", 11, "Muted"), hint = C.Text(targets.Count == 0 ? "No PCs or phones connected" : targets.Count == 1 ? "Click it or press 1" : "Click or press 1–" + targets.Count, 10, "Muted");
+        string what = string.Join(", ", new[] { files > 0 ? Format.Count(files, "file") : "", folders > 0 ? Format.Count(folders, "folder") : "" }.Where(part => part.Length > 0));
+        TextBlock title = C.Text("Send " + what, 12, bold: true), detail = C.Text(files > 0 ? Amount(bytes) + (folders > 0 ? " plus folders" : "") : "Counted when sent", 10, "Muted"), hint = C.Text(targets.Count == 0 ? "No PCs or phones connected" : targets.Count == 1 ? "Click it or press 1" : "Click or press 1–" + targets.Count, 9.5, "Muted");
         foreach (TextBlock text in new[] { title, detail, hint })
         {
             text.TextAlignment = TextAlignment.Center;
-            text.MaxWidth = 104;
+            text.MaxWidth = 84;
             text.TextWrapping = TextWrapping.Wrap;
         }
         // A glass disc in the middle, like this PC on Home.
-        StackPanel center = C.Stack(C.Space(title, 3), C.Space(detail, 6), hint);
+        StackPanel center = C.Stack(C.Space(title, 2), C.Space(detail, 4), hint);
         center.VerticalAlignment = VerticalAlignment.Center;
         center.HorizontalAlignment = HorizontalAlignment.Center;
         Border self = new()
         {
-            Width = 124,
-            Height = 124,
-            CornerRadius = new(62),
+            Width = 96,
+            Height = 96,
+            CornerRadius = new(48),
             BorderThickness = new(1),
             Child = center
         };
         self.SetResourceReference(Border.BackgroundProperty, "Glass");
         self.SetResourceReference(Border.BorderBrushProperty, "GlassEdge");
-        Place(stage, self, Middle - 62, Middle - 62);
+        Place(stage, self, Middle - 48, Middle - 48);
         for (int i = 0; i < targets.Count; i++)
         {
             double angle = (-90 + i * 360.0 / targets.Count) * Math.PI / 180;
             Button device = Device(i);
-            // The device circle sits on the orbit line; its name hangs below it.
-            Place(stage, device, Middle + Orbit * Math.Cos(angle) - 42, Middle + Orbit * Math.Sin(angle) - 28);
+            // The device's icon sits on the orbit; its name label hangs just below it.
+            Place(stage, device, Middle + Orbit * Math.Cos(angle) - 50, Middle + Orbit * Math.Sin(angle) - Badge / 2 - 2);
             buttons.Add(device);
         }
         return stage;
@@ -430,107 +493,127 @@ internal sealed class SendRing
         fill.Freeze();
         return new Ellipse { Width = size, Height = size, Fill = fill, IsHitTestVisible = false };
     }
-    private static SolidColorBrush Solid(Color color)
+    private static SolidColorBrush Solid(Color color, byte alpha = 255)
     {
-        SolidColorBrush brush = new(color);
+        SolidColorBrush brush = new(Color.FromArgb(alpha, color.R, color.G, color.B));
         brush.Freeze();
         return brush;
     }
     private Button Device(int index)
     {
-        (string name, Peer? peer, _) = targets[index];
+        (string name, Peer? peer, BrowserDevice? phone) = targets[index];
         Color tint = Palette[index % Palette.Length];
-        // Each device has its own colour: a tinted disc, a coloured letter and edge, and a glow behind it.
-        RadialGradientBrush inside = new()
-        {
-            GradientStops = { new(Color.FromArgb(110, tint.R, tint.G, tint.B), 0), new(Color.FromArgb(40, tint.R, tint.G, tint.B), 1) }
-        };
-        inside.Freeze();
-        Ellipse halo = Glow(tint, 84, 0.55), disc = new()
-        {
-            Width = 52,
-            Height = 52,
-            StrokeThickness = 2,
-            Fill = inside,
-            Stroke = Solid(tint)
-        };
-        halo.Opacity = 0.35;
-        halo.Margin = new(-14);
+        // A calm icon: the phone's own picture when it has one, otherwise a small PC or phone symbol in the device's colour on a lightly
+        // tinted disc with a thin edge, and a soft glow behind it.
+        Ellipse halo = Glow(tint, 64, 0.4);
+        halo.Opacity = 0.22;
+        halo.Margin = new(-12);
         halo.RenderTransformOrigin = new(0.5, 0.5);
         halo.RenderTransform = new ScaleTransform();
-        TextBlock letter = C.Text(name.Length > 0 ? char.ToUpperInvariant(name[0]).ToString() : "?", 20, bold: true);
-        letter.Foreground = Solid(tint);
-        letter.HorizontalAlignment = HorizontalAlignment.Center;
-        letter.VerticalAlignment = VerticalAlignment.Center;
-        TextBlock digit = C.Text((index + 1).ToString(), 10, bold: true);
-        digit.Foreground = Solid(Color.FromRgb(20, 22, 29));
-        digit.HorizontalAlignment = HorizontalAlignment.Center;
-        Border number = new()
+        ImageSource? picture = C.Picture(phone?.Picture, (int)Badge * 2);
+        RadialGradientBrush inside = new()
         {
-            Width = 18,
-            Height = 18,
-            CornerRadius = new(9),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-            Background = Solid(tint),
-            Child = digit
+            GradientStops = { new(Color.FromArgb(70, tint.R, tint.G, tint.B), 0), new(Color.FromArgb(28, tint.R, tint.G, tint.B), 1) }
         };
-        ScaleTransform lift = new();
+        inside.Freeze();
+        Ellipse disc = new()
+        {
+            Width = Badge,
+            Height = Badge,
+            StrokeThickness = 1,
+            Stroke = Solid(tint, 150),
+            Fill = picture != null ? new ImageBrush(picture) { Stretch = Stretch.UniformToFill } : inside
+        };
         Grid badge = new()
         {
-            Width = 56,
-            Height = 56,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            RenderTransformOrigin = new(0.5, 0.5),
-            RenderTransform = lift
+            Width = Badge + 4,
+            Height = Badge + 4,
+            HorizontalAlignment = HorizontalAlignment.Center
         };
+        ScaleTransform lift = new();
+        badge.RenderTransformOrigin = new(0.5, 0.5);
+        badge.RenderTransform = lift;
         badge.Children.Add(halo);
         badge.Children.Add(disc);
-        badge.Children.Add(letter);
-        badge.Children.Add(number);
-        TextBlock label = C.Text(name, 12, bold: true);
+        if (picture == null)
+        {
+            FrameworkElement icon = C.Icon(peer != null ? "devices" : "phone", 17);
+            if (icon is Viewbox { Child: System.Windows.Shapes.Path symbol })
+                symbol.Stroke = Solid(tint, 230);
+            icon.HorizontalAlignment = HorizontalAlignment.Center;
+            badge.Children.Add(icon);
+        }
+        TextBlock digit = C.Text((index + 1).ToString(), 8.5, bold: true);
+        digit.Foreground = Solid(Color.FromRgb(20, 22, 29));
+        digit.HorizontalAlignment = HorizontalAlignment.Center;
+        digit.VerticalAlignment = VerticalAlignment.Center;
+        badge.Children.Add(new Border
+        {
+            Width = 15,
+            Height = 15,
+            CornerRadius = new(7.5),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Background = Solid(tint, 235),
+            Child = digit
+        });
+        // The name on its own dark label, so it reads clearly over the waves and the orbit.
+        TextBlock label = C.Text(name, 11.5);
+        label.FontWeight = FontWeights.SemiBold;
         label.TextAlignment = TextAlignment.Center;
         label.TextWrapping = TextWrapping.NoWrap;
         label.TextTrimming = TextTrimming.CharacterEllipsis;
+        Border tag = new()
+        {
+            Child = label,
+            Padding = new(7, 2, 7, 3),
+            CornerRadius = new(7),
+            BorderThickness = new(1),
+            MaxWidth = 98,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new(0, 3, 0, 0)
+        };
+        tag.SetResourceReference(Border.BackgroundProperty, "Menu");
+        tag.SetResourceReference(Border.BorderBrushProperty, "GlassBorder");
         Button button = new()
         {
             Style = (Style)app.Window.FindResource("Plain"),
-            Width = 84,
-            Height = 78,
-            Content = C.Stack(badge, C.Space(label, 0, 4)),
+            Width = 100,
+            Height = Badge + 30,
+            Content = C.Stack(badge, tag),
             Cursor = Cursors.Hand
         };
         AutomationProperties.SetName(button, $"{index + 1}. Send to {name}, {(peer != null ? "PC" : "phone")}");
         // Devices appear one after another in their places: they grow in, they never move around.
         if (Motion.On)
         {
-            ScaleTransform grow = new(0.3, 0.3);
-            button.RenderTransformOrigin = new(0.5, 28 / 78.0);
+            ScaleTransform grow = new(0.4, 0.4);
+            button.RenderTransformOrigin = new(0.5, (Badge / 2 + 2) / (Badge + 30));
             button.RenderTransform = grow;
             button.Opacity = 0;
-            TimeSpan begin = TimeSpan.FromSeconds(0.12 + 0.06 * index);
-            DoubleAnimation appear = new(0.3, 1, TimeSpan.FromSeconds(0.5))
+            TimeSpan begin = TimeSpan.FromSeconds(0.1 + 0.05 * index);
+            DoubleAnimation appear = new(0.4, 1, TimeSpan.FromSeconds(0.45))
             {
                 EasingFunction = Bezier.Spring,
                 BeginTime = begin
             };
             grow.BeginAnimation(ScaleTransform.ScaleXProperty, appear);
             grow.BeginAnimation(ScaleTransform.ScaleYProperty, appear);
-            button.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.25)) { BeginTime = begin });
+            button.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.22)) { BeginTime = begin });
         }
         // The device under the pointer or keyboard grows a little and its glow breathes.
         Action? breathing = null;
         void Mark(bool on)
         {
-            Motion.To(lift, ScaleTransform.ScaleXProperty, on ? 1.12 : 1, Motion.On ? 0.3 : 0, Bezier.Spring);
-            Motion.To(lift, ScaleTransform.ScaleYProperty, on ? 1.12 : 1, Motion.On ? 0.3 : 0, Bezier.Spring);
-            halo.Opacity = on ? 0.9 : 0.35;
+            Motion.To(lift, ScaleTransform.ScaleXProperty, on ? 1.08 : 1, Motion.On ? 0.25 : 0, Bezier.Spring);
+            Motion.To(lift, ScaleTransform.ScaleYProperty, on ? 1.08 : 1, Motion.On ? 0.25 : 0, Bezier.Spring);
+            halo.Opacity = on ? 0.6 : 0.22;
             breathing?.Invoke();
             breathing = null;
             if (!on || !Motion.On)
                 return;
             ScaleTransform pulse = (ScaleTransform)halo.RenderTransform;
-            DoubleAnimation beat = new(1, 1.22, TimeSpan.FromSeconds(0.8))
+            DoubleAnimation beat = new(1, 1.15, TimeSpan.FromSeconds(0.9))
             {
                 AutoReverse = true,
                 RepeatBehavior = RepeatBehavior.Forever,
@@ -549,20 +632,23 @@ internal sealed class SendRing
     }
     private void Pressed(object sender, KeyEventArgs e)
     {
+        // Escape and the number keys usually arrive through the keyboard hook (Key); these cover the ring having the focus as well.
         int focused = buttons.FindIndex(button => button.IsKeyboardFocused);
-        int number = e.Key is >= Key.D1 and <= Key.D9 ? e.Key - Key.D1 : e.Key is >= Key.NumPad1 and <= Key.NumPad9 ? e.Key - Key.NumPad1 : -1;
-        if (e.Key == Key.Escape)
+        int number = e.Key is >= System.Windows.Input.Key.D1 and <= System.Windows.Input.Key.D9 ? e.Key - System.Windows.Input.Key.D1 : e.Key is >= System.Windows.Input.Key.NumPad1 and <= System.Windows.Input.Key.NumPad9 ? e.Key - System.Windows.Input.Key.NumPad1 : -1;
+        if (e.Key == System.Windows.Input.Key.Escape)
             Close(true);
         else if (number >= 0 && number < targets.Count)
             Send(number);
-        else if (buttons.Count > 0 && e.Key is Key.Right or Key.Down or Key.Left or Key.Up)
-            buttons[((focused < 0 ? 0 : focused + (e.Key is Key.Right or Key.Down ? 1 : -1)) + buttons.Count) % buttons.Count].Focus();
+        else if (buttons.Count > 0 && e.Key is System.Windows.Input.Key.Right or System.Windows.Input.Key.Down or System.Windows.Input.Key.Left or System.Windows.Input.Key.Up)
+            buttons[((focused < 0 ? 0 : focused + (e.Key is System.Windows.Input.Key.Right or System.Windows.Input.Key.Down ? 1 : -1)) + buttons.Count) % buttons.Count].Focus();
         else
             return;
         e.Handled = true;
     }
     private async void Send(int index)
     {
+        if (closing)
+            return;
         (string name, Peer? peer, BrowserDevice? phone) = targets[index];
         Close(true);
         string what = paths.Length == 1 ? System.IO.Path.GetFileName(paths[0].TrimEnd('\\')) : paths.Length + " items";
@@ -588,26 +674,30 @@ internal sealed class SendRing
     private void Show()
     {
         Native.Point pointer = Native.Cursor();
-        window.SourceInitialized += (_, _) => Native.MoveTo(Handle, pointer.X, pointer.Y, false);
-        // Once the window has the pointer's screen scale, centre it on the pointer, inside the screen, then fade it in.
-        window.ContentRendered += (_, _) =>
+        // The window takes the whole screen under the pointer (taskbar included); the circle is placed at the pointer inside it.
+        window.SourceInitialized += (_, _) => Native.Cover(Handle, pointer);
+        // Placed as soon as the layout is ready (not after the first frame is drawn, which could take a second on a large screen).
+        window.Loaded += (_, _) =>
         {
-            Native.MoveTo(Handle, pointer.X, pointer.Y, true);
+            Point at = window.PointFromScreen(new Point(pointer.X, pointer.Y));
+            Canvas.SetLeft(stage, Math.Clamp(at.X - Middle, 8, Math.Max(8, cover.ActualWidth - Size - 8)));
+            Canvas.SetTop(stage, Math.Clamp(at.Y - Middle, 8, Math.Max(8, cover.ActualHeight - Size - 8)));
             Native.Foreground(Handle);
             window.Activate();
             if (buttons.Count > 0)
                 buttons[0].Focus();
-            window.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1, TimeSpan.FromSeconds(Motion.On ? 0.16 : 0)));
+            stage.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1, TimeSpan.FromSeconds(Motion.On ? 0.16 : 0)));
         };
         window.Show();
     }
     private IntPtr Handle => new WindowInteropHelper(window).Handle;
-    /// <summary>Closes the ring; with <paramref name="giveBack"/> (a device chosen or Esc) the window it was opened over gets the focus back first.</summary>
+    /// <summary>Closes the ring; with <paramref name="giveBack"/> (a device chosen, Escape or a click outside) the window it was opened over gets the focus back first.</summary>
     private void Close(bool giveBack)
     {
         if (closing)
             return;
         closing = true;
+        Showing = false;
         if (giveBack && returnTo != IntPtr.Zero && Native.IsWindow(returnTo))
             Native.Foreground(returnTo);
         window.Close();
@@ -710,6 +800,16 @@ internal static class Native
     }
     public static Point Cursor() => GetCursorPos(out Point point) ? point : default;
     /// <summary>Moves the window's top-left to the point, or with <paramref name="centre"/> its middle, kept inside that screen's work area.</summary>
+    /// <summary>Sizes the window to the whole screen (monitor) under the point, taskbar included.</summary>
+    public static void Cover(IntPtr window, Point point)
+    {
+        MonitorInfo screen = new()
+        {
+            Size = Marshal.SizeOf<MonitorInfo>()
+        };
+        if (GetMonitorInfo(MonitorFromPoint(point, 2), ref screen))
+            _ = SetWindowPos(window, IntPtr.Zero, screen.Monitor.Left, screen.Monitor.Top, screen.Monitor.Right - screen.Monitor.Left, screen.Monitor.Bottom - screen.Monitor.Top, 0x0004 | 0x0010);
+    }
     public static void MoveTo(IntPtr window, int x, int y, bool centre)
     {
         if (!GetWindowRect(window, out Rect box))
