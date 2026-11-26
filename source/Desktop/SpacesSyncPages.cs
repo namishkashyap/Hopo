@@ -26,12 +26,18 @@ internal sealed class SpacesPage : IPage
         View.AttachedToVisualTree += (_, _) => timer.Start();
         View.DetachedFromVisualTree += (_, _) => timer.Stop();
     }
+    private string shownSpaces = "";
     public void Refresh()
     {
         RefreshActivity();
         remote.RefreshPeers();
-        spaces.Children.Clear();
         SharedSpace[] selected = app.Engine.Browser.Spaces.Spaces.Where(space => space.Name.Contains(app.Search, StringComparison.OrdinalIgnoreCase)).ToArray();
+        // The space cards (and their disk checks) are redone only when what they show changed.
+        string key = System.Text.Json.JsonSerializer.Serialize(selected) + app.Engine.Running + app.Store.Preferences.DeviceName + Theme.Dark + string.Join('|', app.Store.Peers.Where(peer => peer.Paired && !peer.Blocked).Select(peer => peer.Fingerprint + peer.Name));
+        if (key == shownSpaces && spaces.Children.Count > 0)
+            return;
+        shownSpaces = key;
+        spaces.Children.Clear();
         if (selected.Length == 0)
             spaces.Children.Add(C.Empty("Choose a folder to make your first space.", "Only the folder you select becomes available. A space stays registered across restarts, and is live while sharing is on and this computer is online.", "folder", C.AsyncButton("Choose folder", AddAsync, true, "folder")));
         foreach (SharedSpace space in selected)

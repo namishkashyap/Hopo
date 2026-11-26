@@ -17,12 +17,45 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnCreate(savedInstanceState);
         if (Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu && CheckSelfPermission(global::Android.Manifest.Permission.PostNotifications) != Permission.Granted)
             RequestPermissions([global::Android.Manifest.Permission.PostNotifications], 1);
+        HandleShare(Intent);
+    }
+    /// <summary>"Keep receiving in the background when I leave hopo" (on unless turned off in Settings).</summary>
+    private static bool Background => !HopoHost.Ready || HopoHost.Store.Preferences.CloseToTray;
+    /// <summary>hopo is the app on screen (between OnResume and OnPause).</summary>
+    public static bool OnScreen
+    {
+        get; private set;
+    }
+    protected override void OnResume()
+    {
+        base.OnResume();
+        OnScreen = true;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => Lantoss.Desktop.Motion.Paused = false);
+    }
+    protected override void OnPause()
+    {
+        OnScreen = false;
+        // Nothing is drawn while hopo is in the background: the rings and glows stop until it comes back.
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => Lantoss.Desktop.Motion.Paused = true);
+        base.OnPause();
+    }
+    protected override void OnStart()
+    {
+        base.OnStart();
+        if (!Background)
+            return;
         try
         {
             ReceiveService.Start(this);
         }
         catch (Exception error) { CrashReport.Save(error, "Background service"); }
-        HandleShare(Intent);
+    }
+    protected override void OnStop()
+    {
+        base.OnStop();
+        // With background receiving turned off, the "hopo is ready" service ends when hopo leaves the screen.
+        if (!Background)
+            StopService(new Intent(this, typeof(ReceiveService)));
     }
     protected override void OnNewIntent(Intent? intent)
     {
@@ -50,6 +83,7 @@ public sealed class MainActivity : AvaloniaMainActivity
         {
             string folder = HopoHost.NewBatch();
             List<string> paths = [];
+            string? failure = null;
             List<global::Android.Net.Uri> chosen = [.. uris.Take(256)];
             for (int n = 0; n < chosen.Count; n++)
                 try
@@ -66,10 +100,10 @@ public sealed class MainActivity : AvaloniaMainActivity
                     source.CopyTo(target, 1 << 20);
                     paths.Add(path);
                 }
-                catch (Exception error) when (error is IOException or Java.Lang.Exception or UnauthorizedAccessException) { }
+                catch (Exception error) when (error is IOException or Java.Lang.Exception or UnauthorizedAccessException) { failure = error.Message; }
             if (paths.Count == 0 && string.IsNullOrWhiteSpace(text))
             {
-                Say("The shared files could not be read.");
+                Say("The shared files could not be read" + (failure is { Length: > 0 } ? ": " + failure : "."));
                 return;
             }
             Lantoss.Desktop.Shell? shell = await Screen();

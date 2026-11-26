@@ -22,7 +22,9 @@ public static class ManagedTls
 {
     public sealed record Connection(Stream Stream, string Fingerprint);
     private static readonly SignatureAndHashAlgorithm Signature = new(BcHash.sha256, SignatureAlgorithm.rsa);
-    private static readonly int[] Suites = [CipherSuite.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256];
+    // ChaCha20-Poly1305 first: in this managed TLS it runs about 2.7 times faster than AES-GCM (403 vs 140 MB/s on a PC, 251 vs 93 MB/s
+    // without hardware help, as on phones), so transfers are faster and take less processor time. AES-GCM stays for hopo 2.6.8 and older.
+    private static readonly int[] Suites = [CipherSuite.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, CipherSuite.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256];
     public static async Task<Connection> ConnectAsync(TcpClient socket, Identity identity, string? expected, CancellationToken token)
     {
         socket.ReceiveTimeout = 130000;

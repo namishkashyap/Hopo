@@ -272,6 +272,8 @@ public sealed record ReceiveDecision(bool Accepted, string Folder, DuplicatePoli
 
 public static class Format
 {
+    /// <summary>"1 file", "2 files": a count with the right word.</summary>
+    public static string Count(long value, string singular, string? plural = null) => value + " " + (value == 1 ? singular : plural ?? singular + "s");
     public static string Bytes(long bytes)
     {
         string[] units = ["B", "KB", "MB", "GB", "TB"];

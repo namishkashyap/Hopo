@@ -57,8 +57,8 @@ internal sealed class SettingsPage : IPage
         pictureActions.VerticalAlignment = VerticalAlignment.Center;
         pictureRow.Children.Add(pictureActions);
         static CheckBox Check(string text, bool value) => C.Check(text, value);
-        CheckBox automatic = Check("Start the sharing server automatically when hopo opens", saved.StartReceivingOnOpen),
-            tray = Check("Keep receiving and syncing when I close the window", saved.CloseToTray),
+        CheckBox automatic = Check(OperatingSystem.IsAndroid() ? "Start receiving automatically when hopo opens" : "Start the sharing server automatically when hopo opens", saved.StartReceivingOnOpen),
+            tray = Check(OperatingSystem.IsAndroid() ? "Keep receiving in the background when I leave hopo" : "Keep receiving and syncing when I close the window", saved.CloseToTray),
             autoConnect = Check("Connect automatically to new computers (only when approval is off)", saved.AutoConnect),
             notifications = Check("Show notifications for incoming and finished transfers", saved.Notifications),
             senderFolders = Check("Save received files in a folder named after the sender", saved.SenderFolders),

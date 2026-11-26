@@ -8,6 +8,7 @@ using Avalonia.Controls.Presenters;
 using Avalonia.Media;
 using Avalonia.Media.Transformation;
 using Avalonia.Styling;
+using Avalonia.Threading;
 
 namespace Lantoss.Desktop;
 
@@ -83,6 +84,14 @@ internal static class Motion
     /// <summary>macOS "Reduce motion" and GNOME "Animations" off. Other desktops expose no common setting, so motion stays on there.</summary>
     private static bool SystemReduced()
     {
+#if ANDROID
+        // Android: Settings → Accessibility → Remove animations (the system animator scale is 0).
+        try
+        {
+            return global::Android.Provider.Settings.Global.GetFloat(global::Android.App.Application.Context.ContentResolver, global::Android.Provider.Settings.Global.AnimatorDurationScale, 1f) == 0f;
+        }
+        catch (Java.Lang.Exception) { return false; }
+#endif
         if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux())
             return false;
         try
@@ -105,48 +114,100 @@ internal static class Motion
     /// Calls <paramref name="frame"/> once per frame with the seconds since <paramref name="host"/> appeared, only while it is on screen,
     /// so pages that are gone stop ticking. Endless effects use this: Avalonia animations cannot run forever on brushes.
     /// </summary>
-    public static void Every(Visual host, Action<double> frame)
+    /// <param name="fps">
+    /// At most this many updates a second. Every update redraws the window, so slow effects (a 9 s card sweep, a 60 s glow) at the
+    /// screen's own 90–120 Hz cost the processor for nothing; on a phone they took more than half a core during transfers.
+    /// </param>
+    public static void Every(Visual? host, Action<double> frame, double fps = 30)
     {
-        if (!Enabled)
+        if (!Enabled || host == null)
             return;
-        int run = 0;
+        // One shared 30 fps clock, not a frame request on every screen refresh (that kept the app drawing 90 times a second even when
+        // nothing changed). Effects at the same rate update in the same tick, so the window redraws once for all of them.
+        Effect effect = new(frame, Math.Max(1, (int)Math.Round(30 / fps)));
         host.AttachedToVisualTree += (_, _) =>
         {
-            if (TopLevel.GetTopLevel(host) is not { } top)
-                return;
-            int current = ++run;
-            TimeSpan? first = null;
-            void Tick(TimeSpan now)
-            {
-                if (current != run)
-                    return;
-                first ??= now;
-                frame((now - first.Value).TotalSeconds);
-                top.RequestAnimationFrame(Tick);
-            }
-            top.RequestAnimationFrame(Tick);
+            effect.Clock.Restart();
+            frame(0);
+            effects.Add(effect);
+            ticker.IsEnabled = !paused;
         };
-        host.DetachedFromVisualTree += (_, _) => run++;
+        host.DetachedFromVisualTree += (_, _) =>
+        {
+            effects.Remove(effect);
+            ticker.IsEnabled = effects.Count > 0 && !paused;
+        };
+    }
+    private sealed record Effect(Action<double> Frame, int Every)
+    {
+        public Stopwatch Clock { get; } = new();
+    }
+    private static readonly List<Effect> effects = [];
+    private static long ticks;
+    private static readonly DispatcherTimer ticker = Ticker();
+    private static DispatcherTimer Ticker()
+    {
+        DispatcherTimer timer = new(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromSeconds(1 / 30.0)
+        };
+        timer.Tick += (_, _) =>
+        {
+            // A phone left open on a table: the motion settles 20 s after the last touch and starts again with the next one (Wake).
+            if (OperatingSystem.IsAndroid() && idle.Elapsed > TimeSpan.FromSeconds(20))
+            {
+                timer.Stop();
+                return;
+            }
+            ticks++;
+            foreach (Effect effect in effects.ToArray())
+                if (ticks % effect.Every == 0)
+                    effect.Frame(effect.Clock.Elapsed.TotalSeconds);
+        };
+        return timer;
+    }
+    private static bool paused;
+    private static readonly Stopwatch idle = Stopwatch.StartNew();
+    /// <summary>While hopo is not on screen (Android: the app is in the background) its endless effects stop, so they cost no battery.</summary>
+    public static bool Paused
+    {
+        get => paused;
+        set
+        {
+            paused = value;
+            if (!value)
+                idle.Restart();
+            ticker.IsEnabled = !value && effects.Count > 0;
+        }
+    }
+    /// <summary>A touch or click: settled motion (on a phone) starts moving again.</summary>
+    public static void Wake()
+    {
+        idle.Restart();
+        if (!paused && effects.Count > 0 && !ticker.IsEnabled)
+            ticker.Start();
     }
     /// <summary>The card's edge sweep, every 9 s.</summary>
-    public static void Card(Visual card, LinearGradientBrush sweep) => Every(card, time =>
+    // On a phone every update redraws the whole screen, which costs far more than on a computer: the card sweeps and the
+    // background glows (9 s and 60 s cycles, barely visible) stay still there, and only Home's rings move.
+    public static void Card(Visual card, LinearGradientBrush sweep) => Every(OperatingSystem.IsAndroid() ? null : card, time =>
     {
         double pass = InOut.Ease(Cycle(time / 9)) * 2.8;
         sweep.StartPoint = At(-2.4 + pass, 0);
         sweep.EndPoint = At(.6 + pass, 1.4);
-    });
+    }, 15);
     /// <summary>One background glow drifting by a share of the window and scaling, easing in and out and reversing forever.</summary>
     public static void Drift(Visual field, RadialGradientBrush glow, double x, double y, double scale, double seconds)
     {
         Point from = glow.Center.Point;
         double radiusX = glow.RadiusX.Scalar, radiusY = glow.RadiusY.Scalar;
-        Every(field, time =>
+        Every(OperatingSystem.IsAndroid() ? null : field, time =>
         {
             double progress = InOut.Ease(Triangle(Cycle(time / (2 * seconds)))), size = 1 + (scale - 1) * progress;
             glow.Center = glow.GradientOrigin = At(from.X + x * progress, from.Y + y * progress);
             glow.RadiusX = new RelativeScalar(radiusX * size, RelativeUnit.Relative);
             glow.RadiusY = new RelativeScalar(radiusY * size, RelativeUnit.Relative);
-        });
+        }, 15);
     }
     /// <summary>Rises <paramref name="distance"/> px and fades in; hidden until its delay ends.</summary>
     public static void Rise(Visual target, double distance, double seconds, double delay = 0, Easing? easing = null)

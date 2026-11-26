@@ -17,7 +17,7 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App>
     {
         get; private set;
     }
-    private const string Channel = "hopo";
+    private const string Channel = "hopo", Quiet = "hopo-quiet";
     private WifiManager.MulticastLock? multicast;
     private PowerManager.WakeLock? awake;
     private WifiManager.WifiLock? fastWifi;
@@ -53,7 +53,8 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App>
         Intent open = new(this, typeof(MainActivity));
         open.SetFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
         string text = $"{request.Manifest.FileCount} {(request.Manifest.FileCount == 1 ? "file" : "files")} · {Lantoss.Core.Format.Bytes(request.Manifest.TotalBytes)}";
-        Notification.Builder builder = new Notification.Builder(this, Channel)
+        // With hopo on screen its own panel already asks; the notification then waits quietly in the shade instead of covering the panel.
+        Notification.Builder builder = new Notification.Builder(this, MainActivity.OnScreen ? Quiet : Channel)
             .SetContentTitle(request.PeerName + " wants to send you files")
             .SetContentText(text)
             .SetSmallIcon(Resource.Drawable.icon)
@@ -143,7 +144,10 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App>
             multicast.Acquire();
         }
         if (GetSystemService(NotificationService) is NotificationManager manager)
+        {
             manager.CreateNotificationChannel(new NotificationChannel(Channel, "Transfers", NotificationImportance.High) { Description = "Incoming files and finished transfers" });
+            manager.CreateNotificationChannel(new NotificationChannel(Quiet, "Transfers while hopo is open", NotificationImportance.Low) { Description = "Incoming files while hopo is on screen; hopo asks in the app itself" });
+        }
         // The same Inter typeface as hopo on the PC, Mac and Linux.
         return base.CustomizeAppBuilder(builder).WithInterFont();
     }

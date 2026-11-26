@@ -32,7 +32,9 @@ internal sealed class HomePage : IPage
     private readonly Border activity = new() { Width = 240, Padding = new(14, 10), CornerRadius = new(16), BorderThickness = new(1), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new(24, 0, 0, 12), IsVisible = false, Cursor = new Cursor(StandardCursorType.Hand) };
     private readonly TextBlock activityTitle = C.Text("", 13, bold: true), activityDetail = C.Text("", 12, "Muted");
     private readonly Path[] lines = new Path[Waves.Length], glows = new Path[Waves.Length], halos = new Path[Waves.Length];
-    private readonly Point[] samples = new Point[180];
+    // A phone redraws the rings with a fraction of a desktop's power: every 6° instead of every 2° (still smooth curves) and without the widest glow.
+    private static readonly int Stride = OperatingSystem.IsAndroid() ? 3 : 1;
+    private readonly Point[] samples = new Point[180 / Stride];
     private readonly (Border Ripple, ScaleTransform Scale)[] ripples = new (Border, ScaleTransform)[2];
     private readonly List<Blink> blinks = [];
     private readonly List<Action> cards = [];
@@ -63,7 +65,8 @@ internal sealed class HomePage : IPage
             Width = Size,
             Height = Size,
             IsHitTestVisible = false,
-            Opacity = .22
+            // On a phone the .22 is part of each glow's colour instead: a faded layer is drawn off screen and blended back every frame.
+            Opacity = OperatingSystem.IsAndroid() ? 1 : .22
         }, lineLayer = new()
         {
             Width = Size,
@@ -73,9 +76,12 @@ internal sealed class HomePage : IPage
         for (int index = 0; index < Waves.Length; index++)
         {
             IBrush color = Theme.Brush(Waves[index].Color);
-            haloLayer.Children.Add(halos[index] = new Path { Stroke = color, StrokeThickness = 9, StrokeJoin = PenLineJoin.Round });
-            glowLayer.Children.Add(glows[index] = new Path { Stroke = color, StrokeThickness = 3.5, StrokeJoin = PenLineJoin.Round });
-            lineLayer.Children.Add(lines[index] = new Path { Stroke = color, StrokeThickness = .7, StrokeJoin = PenLineJoin.Round });
+            halos[index] = new Path { Stroke = color, StrokeThickness = 9, StrokeJoin = PenLineJoin.Round };
+            if (!OperatingSystem.IsAndroid())
+                haloLayer.Children.Add(halos[index]);
+            // A phone fades each line through its own brush (drawn directly) rather than the line's opacity (drawn off screen and blended).
+            glowLayer.Children.Add(glows[index] = new Path { Stroke = OperatingSystem.IsAndroid() ? Theme.Brush(Waves[index].Color) : color, StrokeThickness = 3.5, StrokeJoin = PenLineJoin.Round });
+            lineLayer.Children.Add(lines[index] = new Path { Stroke = OperatingSystem.IsAndroid() ? Theme.Brush(Waves[index].Color) : color, StrokeThickness = .7, StrokeJoin = PenLineJoin.Round });
         }
         stage.Children.Add(haloLayer);
         stage.Children.Add(glowLayer);
@@ -99,7 +105,7 @@ internal sealed class HomePage : IPage
                 IsHitTestVisible = false
             };
             ripples[index] = (ripple, scale);
-            stage.Children.Add(Place(ripple, Middle - 100, Middle - 100));
+            stage.Children.Add(Place(C.Cached(ripple), Middle - 100, Middle - 100));
         }
         Border glow = new()
         {
@@ -121,7 +127,7 @@ internal sealed class HomePage : IPage
         name.HorizontalAlignment = kind.HorizontalAlignment = HorizontalAlignment.Center;
         StackPanel label = C.Stack(glow, name, C.Space(kind, 0, 2));
         label.VerticalAlignment = VerticalAlignment.Center;
-        stage.Children.Add(Place(new Border { Width = core, Height = core, CornerRadius = new(core / 2), Background = Theme.Brush("Glass"), BorderBrush = Theme.Brush("Text/18"), BorderThickness = new(1), BoxShadow = new BoxShadows(new BoxShadow { Blur = 60, Color = Theme.Color(Theme.Dark ? "GlowA/35" : "GlowA/25") }), Child = label, IsHitTestVisible = false }, Middle - core / 2, Middle - core / 2));
+        stage.Children.Add(Place(C.Cached(new Border { Width = core, Height = core, CornerRadius = new(core / 2), Background = Theme.Brush("Glass"), BorderBrush = Theme.Brush("Text/18"), BorderThickness = new(1), BoxShadow = new BoxShadows(new BoxShadow { Blur = 60, Color = Theme.Color(Theme.Dark ? "GlowA/35" : "GlowA/25") }), Child = label, IsHitTestVisible = false }), Middle - core / 2, Middle - core / 2));
         stage.Children.Add(devices);
         foreach ((string key, string text, string icon) in new[] { ("send", "Send files", "send"), ("folder", "Folder", "folder"), ("text", "Text", "text"), ("phone", "Phone", "phone") })
         {
@@ -130,7 +136,7 @@ internal sealed class HomePage : IPage
                 continue;
             dock[key] = C.Button(text, () => Open(sheet == key ? null : key), key == "send", icon);
         }
-        Border bar = new()
+        Border bar = C.Cached(new Border()
         {
             Child = C.Inline([.. dock.Values]),
             Padding = new(8),
@@ -140,7 +146,7 @@ internal sealed class HomePage : IPage
             BorderThickness = new(1),
             BoxShadow = Theme.Shadow(24, 60, 0.45),
             HorizontalAlignment = HorizontalAlignment.Center
-        };
+        });
         StackPanel foot = C.Stack(bar);
         activityTitle.TextTrimming = activityDetail.TextTrimming = TextTrimming.CharacterEllipsis;
         activity.Child = C.Stack(activityTitle, activityDetail);
@@ -186,7 +192,8 @@ internal sealed class HomePage : IPage
             }
         };
         layout.AttachedToVisualTree += (_, _) => last = 0;
-        Motion.Every(layout, Step);
+        // 15 updates a second on a phone (the rings turn over 90 to 130 s, so it looks the same) and 30 on a computer.
+        Motion.Every(layout, Step, OperatingSystem.IsAndroid() ? 15 : 30);
         Motion.Rise(bar, 26, .9, .15);
         View = layout;
         Draw();
@@ -221,7 +228,8 @@ internal sealed class HomePage : IPage
             double[] from = Shapes[index][(int)Math.Round(start / .33)], to = Shapes[index][((int)Math.Round(start / .33) + 1) % 3];
             for (int step = 0; step < samples.Length; step++)
             {
-                double radius = (from[step] + (to[step] - from[step]) * blend) * scale, angle = step * Math.PI / 90 + turn;
+                int at = step * Stride;
+                double radius = (from[at] + (to[at] - from[at]) * blend) * scale, angle = at * Math.PI / 90 + turn;
                 samples[step] = new(Middle + radius * Math.Cos(angle), Middle + radius * Math.Sin(angle));
             }
             // Smooth curves through the samples (Catmull-Rom as cubic Béziers), so the ring has no corners between points.
@@ -239,7 +247,14 @@ internal sealed class HomePage : IPage
             }
             lines[index].Data = glows[index].Data = halos[index].Data = geometry;
             // Shimmer between .55 and 1 every 7 s, each ring 0.6 s ahead of the previous one.
-            lines[index].Opacity = glows[index].Opacity = halos[index].Opacity = moving ? .55 + .45 * Motion.InOut.Ease(Motion.Triangle(Motion.Cycle((clock + .6 * index) / 7))) : 1;
+            double shimmer = moving ? .55 + .45 * Motion.InOut.Ease(Motion.Triangle(Motion.Cycle((clock + .6 * index) / 7))) : 1;
+            if (OperatingSystem.IsAndroid() && lines[index].Stroke is SolidColorBrush line && glows[index].Stroke is SolidColorBrush glow)
+            {
+                line.Opacity = shimmer;
+                glow.Opacity = shimmer * .22;
+            }
+            else
+                lines[index].Opacity = glows[index].Opacity = halos[index].Opacity = shimmer;
         }
         for (int index = 0; index < ripples.Length; index++)
         {
@@ -325,6 +340,8 @@ internal sealed class HomePage : IPage
             BoxShadow = new BoxShadows(new BoxShadow { Spread = 4, Color = Theme.Color(spot.Color + "/15") }, [new BoxShadow { Blur = 16, Color = Theme.Color(spot.Color + "/75") }]),
             RenderTransform = beat
         };
+        C.Cached(dot);
+        C.Cached(ping);
         blinks.Add(new(dot, beat, ping, spread, index * 1.05));
         Button blip = C.Ghost(new Button { Content = new Panel { Width = 44, Height = 44, Children = { ping, dot } }, Width = 44, Height = 44, Padding = new(0), CornerRadius = new(22), BorderThickness = new(0), Classes = { "plain" } });
         AutomationProperties.SetName(blip, spot.Name + (spot.Browser != null ? ", through the browser" : ", on your network"));
@@ -740,7 +757,7 @@ internal sealed class SendPage : IPage
         totals.Text = $"{Count(app.Selection.Count, "item")} · {Count(app.Selection.Sum(s => s.Files), "file")} · {Format.Bytes(app.Selection.Sum(s => s.Size))}";
         SelectionItem[] visible = app.Selection.Where(s => s.Name.Contains(app.Search, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (visible.Length == 0)
-            files.Children.Add(C.Space(C.Text(app.Selection.Count == 0 ? "Add files or folders, or drop them anywhere in this window." : "No selection matches your search.", 13, "Muted"), 14, 12));
+            files.Children.Add(C.Space(C.Text(app.Selection.Count == 0 ? (OperatingSystem.IsAndroid() ? "Add files to send." : "Add files or folders, or drop them anywhere in this window.") : "No selection matches your search.", 13, "Muted"), 14, 12));
         foreach (SelectionItem item in visible)
         {
             bool folder = item.Folders > 0;

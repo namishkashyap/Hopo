@@ -140,7 +140,7 @@ internal sealed class AppShell : IDisposable
             if (notifications != null && Store.Preferences.Notifications)
             {
                 notifications.BalloonTipTitle = record.Transport.Contains("HTTP", StringComparison.Ordinal) ? record.Direction == "Received" ? "Browser files saved" : "Files sent to browser" : record.Direction == "Received" ? "Files received and verified" : "Transfer verified";
-                notifications.BalloonTipText = $"{record.FileCount} files · {record.PeerName}";
+                notifications.BalloonTipText = $"{Format.Count(record.FileCount, "file")} · {record.PeerName}";
                 notifications.ShowBalloonTip(5000);
             }
         });
@@ -574,7 +574,7 @@ internal sealed class AppShell : IDisposable
         if (notifications == null || !Store.Preferences.Notifications)
             return;
         notifications.BalloonTipTitle = request.PeerName + " wants to send you files";
-        notifications.BalloonTipText = $"{request.Manifest.Entries.Count} files · {Format.Bytes(request.Manifest.TotalBytes)}" + (request.Address.Length > 0 ? " · " + request.Address : "") + ". Click to review.";
+        notifications.BalloonTipText = $"{Format.Count(request.Manifest.FileCount, "file")} · {Format.Bytes(request.Manifest.TotalBytes)}" + (request.Address.Length > 0 ? " · " + request.Address : "") + ". Click to review.";
         notifications.BalloonTipIcon = Forms.ToolTipIcon.Info;
         notifications.ShowBalloonTip(10000);
     }
@@ -656,7 +656,7 @@ internal sealed class AppShell : IDisposable
             }
             if (openSend)
                 Navigate("Send");
-            Tell($"{manifest.FileCount} files and {manifest.FolderCount} folders ready. Select a paired recipient." + LeftOut(leftOut));
+            Tell($"{Format.Count(manifest.FileCount, "file")} and {Format.Count(manifest.FolderCount, "folder")} ready. Select a paired recipient." + LeftOut(leftOut));
         }
         catch (Exception error) { Error(error); }
         finally { selecting = false; }
