@@ -47,3 +47,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-25 | [hopo 2.6.8 release and a clear README](2026-11-25-hopo-2.6.8-release-readme.md) |
 | 2026-11-26 | [Repository and folder cleanup](2026-11-26-repository-cleanup.md) |
 | 2026-11-26 | [hopo Android: polish and phone test (2.6.9)](2026-11-26-hopo-android-polish.md) |
+| 2026-11-26 | [Send ring closes reliably and looks calmer; public test log and roadmap](2026-11-26-send-ring-close-and-test-log.md) |
