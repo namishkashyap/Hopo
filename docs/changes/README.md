@@ -45,3 +45,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-24 | [hopo: the Text panel opens again after another panel](2026-11-24-hopo-text-panel-reopen.md) |
 | 2026-11-25 | [hopo Windows: fixes from the break test (lag, idle work, failed sends)](2026-11-25-hopo-stress-fixes.md) |
 | 2026-11-25 | [hopo 2.6.8 release and a clear README](2026-11-25-hopo-2.6.8-release-readme.md) |
+| 2026-11-26 | [Repository and folder cleanup](2026-11-26-repository-cleanup.md) |
