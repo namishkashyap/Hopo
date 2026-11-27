@@ -20,6 +20,11 @@ public sealed record Preferences
     public bool CloseToTray { get; init; } = true;
     /// <summary>Opens the device ring for the selection in File Explorer: Ctrl+Shift+S, Shift+S or Off (see <see cref="Lantoss.Core.SendShortcut"/>).</summary>
     public string SendShortcut { get; init; } = Lantoss.Core.SendShortcut.Default;
+    /// <summary>Paired devices may list the folders under this PC's user folders (names only) and send straight into one. Off by default.</summary>
+    public bool FolderAccess
+    {
+        get; init;
+    }
     public bool SenderFolders
     {
         get; init;

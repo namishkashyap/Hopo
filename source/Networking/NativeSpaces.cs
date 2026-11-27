@@ -124,7 +124,8 @@ public sealed partial class TransferEngine
         }
         catch (Exception error) { job.State(work.IsCancellationRequested ? TransferState.Cancelled : TransferState.Failed, HumanError(error)); throw; }
     }
-    public async Task UploadToSpaceAsync(Peer peer, string spaceId, string folder, IEnumerable<string> paths, CancellationToken token = default)
+    public Task UploadToSpaceAsync(Peer peer, string spaceId, string folder, IEnumerable<string> paths, CancellationToken token = default) => UploadBatchAsync(peer, "space-upload", spaceId, folder, paths, token);
+    private async Task UploadBatchAsync(Peer peer, string kind, string spaceId, string folder, IEnumerable<string> paths, CancellationToken token)
     {
         Manifest manifest = await FileCatalog.BuildAsync(paths, Guid.NewGuid().ToString("N"), true, token);
         FileCatalog.ValidateManifest(manifest);
@@ -145,7 +146,7 @@ public sealed partial class TransferEngine
         {
             await Wire.WriteAsync(channel.Stream, new()
             {
-                Kind = "space-upload",
+                Kind = kind,
                 SpaceId = spaceId,
                 RelativePath = folder,
                 Manifest = manifest
@@ -410,7 +411,7 @@ public sealed partial class TransferEngine
                     return;
                 }
             case "space-upload":
-                await ReceiveSpaceBatchAsync(stream, peer, space, hello, Guard, token);
+                await ReceiveSpaceBatchAsync(stream, peer, space.Name, space.Id, Browser.Spaces.Resolve(space.Id, hello.RelativePath, true, true), false, hello, Guard, token);
                 return;
             case "sync-put":
                 {
@@ -449,18 +450,18 @@ public sealed partial class TransferEngine
                 throw new ProtocolException("Update Lantoss on both PCs for shared folders and sync.");
         }
     }
-    private async Task ReceiveSpaceBatchAsync(Stream stream, Peer peer, SharedSpace space, WireMessage hello, Action guard, CancellationToken token)
+    /// <summary>Receives an approved batch into a fixed folder: a shared space's subfolder, or a folder chosen through Send to a folder. <paramref name="trusted"/> skips the prompt.</summary>
+    private async Task ReceiveSpaceBatchAsync(Stream stream, Peer peer, string label, string spaceId, string folder, bool trusted, WireMessage hello, Action guard, CancellationToken token)
     {
         Manifest manifest = hello.Manifest ?? throw new ProtocolException("Missing upload manifest.");
         FileCatalog.ValidateManifest(manifest);
-        string folder = Browser.Spaces.Resolve(space.Id, hello.RelativePath, true, true);
         TransferJob job = Transfers.Add(new()
         {
             Id = manifest.Id,
             Direction = "Received",
             PeerName = peer.Name,
             PeerFingerprint = peer.Fingerprint,
-            SpaceId = space.Id,
+            SpaceId = spaceId,
             State = TransferState.AwaitingApproval
         });
         job.Initialize(manifest);
@@ -469,7 +470,7 @@ public sealed partial class TransferEngine
         {
             using CancellationTokenSource approval = CancellationTokenSource.CreateLinkedTokenSource(work.Token);
             approval.CancelAfter(TimeSpan.FromMinutes(2));
-            ReceiveDecision decision = ApproveReceive == null ? new(false, folder) : await ApproveReceive(new(peer.Name + " → " + space.Name, peer.Fingerprint, manifest, folder, FileCatalog.FreeSpace(folder), peer.KeyVerified, false, true), approval.Token);
+            ReceiveDecision decision = trusted ? new(true, folder) : ApproveReceive == null ? new(false, folder) : await ApproveReceive(new(peer.Name + " → " + label, peer.Fingerprint, manifest, folder, FileCatalog.FreeSpace(folder), peer.KeyVerified, false, true), approval.Token);
             if (!decision.Accepted)
             {
                 job.State(TransferState.Declined);
