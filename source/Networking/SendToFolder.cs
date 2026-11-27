@@ -4,19 +4,29 @@ using Lantoss.Core;
 namespace Lantoss.Networking;
 
 /// <summary>
-/// Send to a folder: a paired device lists the folders under this PC's user folders and sends a batch straight into one. Off until the owner turns on <see cref="Preferences.FolderAccess"/>. Only folder names are listed, never file names; every request and the final write are checked again.
+/// Send to a folder: a paired device lists this PC's drop folders (<see cref="Preferences.DropFolders"/>) and their subfolders by name and sends a batch straight into one, or into a new folder one level inside one. Nothing is shared until the owner adds a drop folder. Only folder names are listed, never file names; every request and the final write are checked again.
 /// </summary>
 public sealed partial class TransferEngine
 {
-    /// <summary>The top-level folders another device may send into, by name. Tests replace it.</summary>
-    public Func<(string Name, string Path)[]> FolderRoots { get; set; } = UserFolders;
-    public static (string Name, string Path)[] UserFolders()
+    /// <summary>The drop folders by the name other devices see: the folder's own name, with " (2)" and so on for repeats.</summary>
+    public static (string Name, string Path)[] DropRoots(IEnumerable<string>? folders)
     {
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        (string Name, string Path)[] all = [("Desktop", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)), ("Documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)), ("Downloads", home.Length == 0 ? "" : Path.Combine(home, "Downloads")), ("Pictures", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)), ("Videos", Environment.GetFolderPath(Environment.SpecialFolder.MyVideos)), ("Music", Environment.GetFolderPath(Environment.SpecialFolder.MyMusic))];
-        return all.Where(root => root.Path.Length > 0).ToArray();
+        List<(string Name, string Path)> roots = [];
+        foreach (string folder in folders ?? [])
+        {
+            string full = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), name = Path.GetFileName(full), shown = name;
+            try
+            {
+                FileCatalog.ValidateSegment(name);
+            }
+            catch (InvalidDataException) { continue; }
+            for (int i = 2; roots.Any(root => string.Equals(root.Name, shown, StringComparison.OrdinalIgnoreCase)); i++)
+                shown = name + " (" + i + ")";
+            roots.Add((shown, full));
+        }
+        return [.. roots];
     }
-    /// <summary>Lists the subfolders of <paramref name="folder"/> on another PC ("" lists its user folders). Older versions reply with an update message.</summary>
+    /// <summary>Lists the subfolders of <paramref name="folder"/> on another PC ("" lists its drop folders). Older versions reply with an update message.</summary>
     public async Task<SpaceEntry[]> BrowseFoldersAsync(Peer peer, string folder = "", CancellationToken token = default)
     {
         WireMessage result = await SpaceRequestAsync(peer, new()
@@ -34,7 +44,7 @@ public sealed partial class TransferEngine
         }
         return result.Entries;
     }
-    /// <summary>Sends files and folders into a folder chosen with <see cref="BrowseFoldersAsync"/>. The other PC asks first unless it trusts this device.</summary>
+    /// <summary>Sends files and folders into a folder chosen with <see cref="BrowseFoldersAsync"/>, or into a new folder inside it, which the other PC makes once it accepts. It asks first unless it trusts this device.</summary>
     public Task SendToFolderAsync(Peer peer, string folder, IEnumerable<string> paths, CancellationToken token = default)
     {
         FileCatalog.ValidateRelative(folder);
@@ -43,10 +53,12 @@ public sealed partial class TransferEngine
     private async Task ServeFoldersAsync(Stream stream, Peer peer, WireMessage hello, CancellationToken token)
     {
         string relative = hello.RelativePath;
-        string Folder()
+        // An upload may name a new folder as its last part; the folder above it must already exist.
+        string Folder(bool upload)
         {
-            if (!store.Preferences.FolderAccess)
-                throw new ProtocolException(store.Preferences.DeviceName + " doesn't allow sending into its folders. Turn it on in hopo Settings on that PC.");
+            (string Name, string Path)[] roots = DropRoots(store.Preferences.DropFolders);
+            if (roots.Length == 0)
+                throw new ProtocolException(store.Preferences.DeviceName + " hasn't shared any folders yet. On that PC, open hopo Settings and add a drop folder.");
             if (store.Trusted(peer.Fingerprint) == null)
                 throw new AuthenticationException("The PC's access was revoked.");
             if (relative.Length == 0)
@@ -54,25 +66,25 @@ public sealed partial class TransferEngine
             FileCatalog.ValidateRelative(relative);
             int slash = relative.IndexOf('/');
             string top = slash < 0 ? relative : relative[..slash];
-            (string Name, string Path) root = FolderRoots().FirstOrDefault(item => item.Name == top);
+            (string Name, string Path) root = roots.FirstOrDefault(item => item.Name == top);
             if (root.Path is null)
-                throw new ProtocolException("This folder isn't available.");
-            string folder = slash < 0 ? Path.GetFullPath(root.Path) : FileCatalog.Within(root.Path, relative[(slash + 1)..]);
+                throw new ProtocolException("This folder is no longer shared.");
+            string folder = slash < 0 ? root.Path : FileCatalog.Within(root.Path, relative[(slash + 1)..]), existing = upload && slash >= 0 && !Directory.Exists(folder) ? Path.GetDirectoryName(folder)! : folder;
             try
             {
                 FileCatalog.CheckSafePath(folder);
             }
             catch (IOException) { throw new ProtocolException("Links and cloud-only folders can't be opened."); }
-            if (!Directory.Exists(folder))
+            if (!Directory.Exists(existing) || File.Exists(folder))
                 throw new ProtocolException("This folder is no longer available.");
             return folder;
         }
-        string target = Folder();
+        string target = Folder(hello.Kind == "folder-upload");
         if (hello.Kind == "folder-browse")
         {
             List<SpaceEntry> entries = [];
             if (target.Length == 0)
-                foreach ((string name, string path) in FolderRoots())
+                foreach ((string name, string path) in DropRoots(store.Preferences.DropFolders))
                 {
                     try
                     {
@@ -104,12 +116,13 @@ public sealed partial class TransferEngine
             return;
         }
         if (target.Length == 0)
-            throw new ProtocolException("Choose a folder inside Desktop, Documents, Downloads, Pictures, Videos or Music.");
+            throw new ProtocolException("Open one of the shared folders first, then send.");
         Wire.Require(hello, "folder-upload");
         void Guard()
         {
-            if (Folder() != target)
-                throw new OperationCanceledException("Sending into this folder was turned off.");
+            if (Folder(true) != target)
+                throw new OperationCanceledException("This folder is no longer shared.");
+            Directory.CreateDirectory(target);
         }
         await ReceiveSpaceBatchAsync(stream, peer, relative, "", target, store.Trusted(peer.Fingerprint)?.Trusted == true, hello, Guard, token);
     }

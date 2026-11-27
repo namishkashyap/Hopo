@@ -155,6 +155,10 @@ public sealed class MetadataStore
             {
                 SendShortcut = defaults.SendShortcut
             };
+        loaded = loaded with
+        {
+            DropFolders = [.. (loaded.DropFolders ?? []).Where(folder => !string.IsNullOrEmpty(folder) && Path.IsPathFullyQualified(folder)).Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxDropFolders)]
+        };
         if (string.IsNullOrEmpty(loaded.ReceiveFolder) || !Path.IsPathFullyQualified(loaded.ReceiveFolder))
             loaded = loaded with
             {
@@ -277,14 +281,31 @@ public sealed class MetadataStore
             throw new InvalidDataException("Choose Light, Dark, or System theme.");
         if (!SendShortcut.Valid(preferences.SendShortcut))
             throw new InvalidDataException("Choose Ctrl+Shift+S, Shift+S or Off for the send shortcut.");
+        string[] saved = Preferences.DropFolders, drops = [.. (preferences.DropFolders ?? []).Select(folder => saved.Contains(folder, StringComparer.OrdinalIgnoreCase) ? folder : CheckDropFolder(folder)).Distinct(StringComparer.OrdinalIgnoreCase)];
+        if (drops.Length > MaxDropFolders)
+            throw new InvalidDataException("Share up to " + MaxDropFolders + " drop folders.");
         lock (gate)
             data.Preferences = preferences with
             {
                 DeviceName = name,
                 LocalName = Profiles.AddressName(preferences.LocalName),
-                ReceiveFolder = Path.GetFullPath(preferences.ReceiveFolder)
+                ReceiveFolder = Path.GetFullPath(preferences.ReceiveFolder),
+                DropFolders = drops
             };
         Save();
+    }
+    public const int MaxDropFolders = 20;
+    /// <summary>A drop folder must exist and pass the receive folder checks (local drive, not a drive root or system folder, no links).</summary>
+    public static string CheckDropFolder(string folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathFullyQualified(folder) || !Directory.Exists(folder))
+            throw new InvalidDataException("That folder can't be found. Choose another drop folder.");
+        try
+        {
+            CheckReceiveFolder(folder);
+        }
+        catch (Exception error) when (error is InvalidDataException or IOException) { throw new InvalidDataException(error.Message.Replace("receive folder", "drop folder")); }
+        return Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
     /// <summary>Refuses receive folders that would only fail when a file arrives: a missing or network drive, a drive root, a system folder or a very long path.</summary>
     public static void CheckReceiveFolder(string folder)
