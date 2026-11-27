@@ -30,14 +30,14 @@ internal interface IPage
 /// </summary>
 internal sealed class Shell : IDisposable
 {
-    public static readonly string[] Pages = ["Home", "Send", "Transfers", "Devices", "Phone & browser", "Text & links", "Shared Spaces", "Sync", "History", "Settings"];
+    public static readonly string[] Pages = ["Home", "Send", "Transfers", "Devices", "Phone & browser", "Text & links", "Shared Spaces", "Drop folders", "Sync", "History", "Settings"];
     // Menu rows: page, title, subtitle (Share group only) and icon.
 #if ANDROID
     // A phone cannot host the phone page, share folders or sync them; those pages stay on computers.
-    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text")];
+    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Drop folders", "Drop folders", "Send into a folder on your PC", "download"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text")];
     private static readonly (string Page, string Icon)[] ManageMenu = [("Transfers", "transfer"), ("Devices", "devices"), ("History", "history"), ("Settings", "settings")];
 #else
-    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Shared Spaces", "Share a folder", "Shared spaces for your PCs", "folder"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text"), ("Phone & browser", "Phone & browser", "Scan a QR code, no app needed", "phone")];
+    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Drop folders", "Drop folders", "Send straight into a chosen folder", "download"), ("Shared Spaces", "Share a folder", "Shared spaces for your PCs", "folder"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text"), ("Phone & browser", "Phone & browser", "Scan a QR code, no app needed", "phone")];
     private static readonly (string Page, string Icon)[] ManageMenu = [("Transfers", "transfer"), ("Devices", "devices"), ("Sync", "sync"), ("History", "history"), ("Settings", "settings")];
 #endif
     private static readonly string[] Searchable = ["Send", "Transfers", "Devices", "Text & links", "Shared Spaces", "History"];
@@ -172,7 +172,7 @@ internal sealed class Shell : IDisposable
         Engine.Sync.Changed += () => Ui(() => { if (CurrentPage == "Sync") Later(); });
         Engine.Browser.Notes.Changed += () => Ui(() => { if (CurrentPage == "Text & links") Later(); });
         Engine.Status += message => Ui(() => Tell(message));
-        Engine.PeersChanged += () => Ui(() => { if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces" or "Text & links") Later(); });
+        Engine.PeersChanged += () => Ui(() => { if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces" or "Text & links" or "Drop folders") Later(); });
         Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home") Later(); });
         Engine.Browser.ApprovalRequested += device => Ui(() => { string text = device.Label + " wants to connect. Open hopo to allow it."; Tell(text); if (Store.Preferences.Notifications) Notify("New phone or browser", text); });
         Engine.Transfers.Changed += _ => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") Later(); });
@@ -635,6 +635,7 @@ internal sealed class Shell : IDisposable
             "Phone & browser" => new PhonePage(this),
             "Text & links" => new NotesPage(this),
             "Shared Spaces" => new SpacesPage(this),
+            "Drop folders" => new DropFoldersPage(this),
             "Sync" => new SyncPage(this),
             "History" => new HistoryPage(this),
             _ => new SettingsPage(this)
@@ -868,9 +869,9 @@ internal sealed class Shell : IDisposable
         Tell("Transfer queued. The recipient must approve before any file bytes are sent.");
     }
     /// <summary>Send to a folder: the selection goes straight into a folder chosen on a paired PC. False when nothing was chosen.</summary>
-    public async Task<bool> SendToFolderAsync(Peer peer, bool navigate = true)
+    public Task<bool> SendToFolderAsync(Peer peer, bool navigate = true) => SendToFolderAsync(peer, [.. Selection.Select(item => item.Path)], navigate);
+    public async Task<bool> SendToFolderAsync(Peer peer, string[] paths, bool navigate = true)
     {
-        string[] paths = Selection.Select(item => item.Path).ToArray();
         if (paths.Length == 0 || await Dialogs.ChooseFolderAsync(peer, paths.Length) is not { Length: > 0 } target)
             return false;
         if (navigate)

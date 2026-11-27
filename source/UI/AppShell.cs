@@ -124,7 +124,7 @@ internal sealed class AppShell : IDisposable
         Engine.Browser.Notes.Changed += () => Ui(() => { if (CurrentPage == "Text & links") Later(); });
         Engine.Sync.Changed += () => Ui(() => { if (CurrentPage == "Sync") Later(); });
         Engine.Status += message => Ui(() => Tell(message));
-        Engine.PeersChanged += () => Ui(() => { RefreshExplorerMenu(); if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces") Later(); });
+        Engine.PeersChanged += () => Ui(() => { RefreshExplorerMenu(); if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces" or "Drop folders") Later(); });
         Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home" or "Send") Later(); if (!preview && Engine.Running && FirewallPorts() != firewallPorts) { firewallPorts = FirewallPorts(); _ = Firewall.EnsureAsync(); } });
         Engine.Browser.ApprovalRequested += device => Ui(() => NotifyWaiting(device));
         Engine.Transfers.Changed += record => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") Later(); });
@@ -162,7 +162,7 @@ internal sealed class AppShell : IDisposable
             RefreshExplorerMenu();
         }
         // The menu mirrors the design: Share actions first, with a subtitle and amber tile, then Manage pages. Home is the hopo mark.
-        (string Group, string Name, string Label, string Detail, string Icon)[] items = [("", "Home", "Home", "", "home"), ("Share", "Send", "Send files", "To a PC or phone on your network", "send"), ("Share", "Shared Spaces", "Share a folder", "Shared spaces for your PCs", "folder"), ("Share", "Text & links", "Share text or a link", "Notes, addresses, URLs", "file"), ("Share", "Phone & browser", "Phone & browser", "Scan a QR code, no app needed", "phone"), ("Manage", "Transfers", "Transfers", "", "transfer"), ("Manage", "Devices", "Devices", "", "devices"), ("Manage", "Past connections", "Past connections", "Devices that are offline now", "history"), ("Manage", "Sync", "Sync", "", "sync"), ("Manage", "History", "History", "", "history"), ("Manage", "Settings", "Settings", "", "settings")];
+        (string Group, string Name, string Label, string Detail, string Icon)[] items = [("", "Home", "Home", "", "home"), ("Share", "Send", "Send files", "To a PC or phone on your network", "send"), ("Share", "Drop folders", "Drop folders", "Send straight into a chosen folder", "download"), ("Share", "Shared Spaces", "Share a folder", "Shared spaces for your PCs", "folder"), ("Share", "Text & links", "Share text or a link", "Notes, addresses, URLs", "file"), ("Share", "Phone & browser", "Phone & browser", "Scan a QR code, no app needed", "phone"), ("Manage", "Transfers", "Transfers", "", "transfer"), ("Manage", "Devices", "Devices", "", "devices"), ("Manage", "Past connections", "Past connections", "Devices that are offline now", "history"), ("Manage", "Sync", "Sync", "", "sync"), ("Manage", "History", "History", "", "history"), ("Manage", "Settings", "Settings", "", "settings")];
         StackPanel menu = Find<StackPanel>("Navigation");
         foreach ((string group, string name, string label, string detail, string icon) in items)
         {
@@ -439,6 +439,7 @@ internal sealed class AppShell : IDisposable
             "Phone & browser" => new PhoneBrowserPage(this),
             "Text & links" => new NotesPage(this),
             "Shared Spaces" => new SharedSpacesPage(this),
+            "Drop folders" => new DropFoldersPage(this),
             "Sync" => new SyncPage(this),
             "History" => new HistoryPage(this),
             "Settings" => new SettingsPage(this),

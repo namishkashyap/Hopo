@@ -86,7 +86,7 @@ internal sealed class Dialogs(Shell app)
         up.IsEnabled = send.IsEnabled = false;
         TextBox newName = new()
         {
-            Watermark = "New folder name",
+            PlaceholderText = "New folder name",
             MinWidth = 180,
             Margin = new(0, 0, 8, 0)
         };

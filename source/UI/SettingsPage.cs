@@ -101,44 +101,6 @@ internal sealed class SettingsPage : IPage
             IsChecked = saved.SenderFolders,
             Margin = new(0, 0, 0, 15)
         };
-        List<string> drops = [.. saved.DropFolders];
-        StackPanel dropList = new()
-        {
-            Margin = new(0, 6, 0, 8)
-        };
-        void SaveDrops()
-        {
-            app.Store.SetPreferences(app.Store.Preferences with
-            {
-                DropFolders = [.. drops]
-            });
-            drops = [.. app.Store.Preferences.DropFolders];
-            FillDrops();
-        }
-        void FillDrops()
-        {
-            dropList.Children.Clear();
-            if (drops.Count == 0)
-                dropList.Children.Add(C.Text("No folders shared yet.", 12, "Muted"));
-            foreach (string drop in drops)
-            {
-                Button remove = C.Small("Remove", () => { drops.Remove(drop); SaveDrops(); app.Tell(Path.GetFileName(drop) + " is no longer shared."); });
-                DockPanel.SetDock(remove, Dock.Right);
-                TextBlock path = C.Text(drop, 11, "Muted");
-                path.TextWrapping = TextWrapping.NoWrap;
-                path.TextTrimming = TextTrimming.CharacterEllipsis;
-                StackPanel text = C.Stack(C.Text(Path.GetFileName(drop), 13, bold: true), path);
-                text.VerticalAlignment = VerticalAlignment.Center;
-                text.ToolTip = drop;
-                text.Margin = new(8, 0, 8, 0);
-                FrameworkElement icon = C.Icon("folder", 15, "Primary");
-                icon.VerticalAlignment = VerticalAlignment.Center;
-                DockPanel.SetDock(icon, Dock.Left);
-                dropList.Children.Add(new DockPanel { Margin = new(0, 0, 0, 4), LastChildFill = true, Children = { remove, icon, text } });
-            }
-        }
-        FillDrops();
-        Button addDrop = C.Button("Add drop folder", () => { OpenFolderDialog dialog = new() { Title = "Choose a folder phones and PCs can send into", Multiselect = true }; if (dialog.ShowDialog(app.Window) != true) return; foreach (string chosen in dialog.FolderNames) { string full = MetadataStore.CheckDropFolder(chosen); if (!drops.Contains(full, StringComparer.OrdinalIgnoreCase)) drops.Add(full); } SaveDrops(); app.Tell("Paired phones and PCs can now send into " + string.Join(", ", dialog.FolderNames.Select(Path.GetFileName)) + "."); }, icon: "folder");
         CheckBox notifications = new()
         {
             Content = "Show Windows notifications for incoming and finished transfers",
@@ -237,7 +199,7 @@ internal sealed class SettingsPage : IPage
                 AutoConfigureFirewall = firewall.IsChecked == true,
                 CloseToTray = tray.IsChecked == true,
                 SenderFolders = senderFolders.IsChecked == true,
-                DropFolders = [.. drops],
+                DropFolders = app.Store.Preferences.DropFolders,
                 LocalName = address.Text,
                 SendShortcut = shortcut.SelectedItem as string ?? SendShortcut.Default
             });
@@ -251,7 +213,6 @@ internal sealed class SettingsPage : IPage
         }, true);
         StackPanel general = C.Stack(C.Heading("General"), C.Text("Profile picture", 12, bold: true), C.Space(pictureRow, 18, 8), C.Text("Name shown to other devices", 12, bold: true), name, C.Space(C.Text("Appearance", 12, bold: true), 8), C.Space(C.Text("Choose System, Light, or Dark in the menu. Changes save immediately; System follows Windows automatically.", 12, "Muted"), 16), C.Space(startup, 7), C.Space(automatic, 7), C.Space(tray, 7), C.Space(explorer, 7), C.Space(C.Text("Send with hopo is in the right-click menu. On Windows 11 it is in the first menu once Windows trusts hopo's signature (setup asks once); otherwise it is under Show more options. Choose a paired PC or open the device picker.", 11, "Muted"), 12), C.Text("Send shortcut in File Explorer", 12, bold: true), shortcut, C.Space(C.Text("Select files in File Explorer or on the desktop and press it: your connected PCs and phones appear in a ring at the pointer. It only works in the file list, never while you type a name or search.", 11, "Muted"), 12), C.Space(autoConnect, 7), C.Space(notifications, 12), save);
         StackPanel transfers = C.Stack(C.Heading("Transfers"), C.Space(C.Text("Files are saved locally on this PC", 12, bold: true), 9), C.Space(folderText, 15), C.Space(folderPicker, 17), senderFolders,
-            C.Space(C.Text("Drop folders", 12, bold: true), 4), C.Text("Paired phones and PCs can send straight into these folders, or make a new folder inside one. They see folder names only, never your files. Devices set to Always accept send without asking; others need your approval.", 11, "Muted"), dropList, C.Space(addDrop, 17),
             C.Space(C.Text("Manual transfers require approval. Linked-folder sync uses its separate one-time host permission. Keep both is the default for manual duplicates.", 12, "Muted"), 15), C.Text("Closing the window keeps the server running when the tray option is enabled. Use Exit hopo in the tray to stop it. Transfer pause/resume and bandwidth limits are not included.", 11, "Muted"));
         NetworkAdapter[] available = NetworkAdapter.Available();
         ComboBox adapter = new()
