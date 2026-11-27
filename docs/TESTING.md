@@ -21,6 +21,25 @@ Speeds below were measured on a home network: the phone on 2.4 GHz Wi-Fi (286 Mb
 
 ---
 
+## 2.7.1: Drop folders page
+
+**Reported:** the Drop folders setting couldn't be found.
+
+**Found:** on Windows, Settings is only in the Admin app, so the Users app never showed it. On the phone the setting was hidden, because a phone only sends.
+
+**Fixed:** Drop folders is now its own page in the Share menu, in both Windows apps, on the phone and on Mac/Linux.
+- **On a PC:** the page lists this PC's drop folders, with Add drop folder and Remove.
+- **On every device:** the page lists paired devices, each with *Choose files*, to send into a folder on that device.
+- The setting was removed from Settings.
+
+**Tested:**
+- The 334 automated checks.
+- The Windows screen checks, which now draw the new page and check the menu in both apps.
+- The phone/Mac/Linux pages drawn to images.
+- The Windows folder browser real-window test (12 of 12).
+- Both MSIs pass verify-installer. The APK reports version 2.7.1 (code 9).
+- **Not yet tested on the phone:** it was not connected.
+
 ## 2.7.0: Send to a folder
 
 **New:** the PC owner adds *drop folders* in Settings. From a phone or another PC, open one of them (or a folder inside it), or make a new folder there, and send straight into it. Only folder names are shown, never files. Devices set to *Always accept* skip the prompt; others are asked.
