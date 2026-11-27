@@ -21,6 +21,34 @@ Speeds below were measured on a home network: the phone on 2.4 GHz Wi-Fi (286 Mb
 
 ---
 
+## 2.7.0: Send to a folder
+
+**New:** from a phone or PC, open a paired PC's folders (Desktop, Documents, Downloads, Pictures, Videos, Music and their subfolders), pick one, and send straight into it. The receiving PC turns it on in Settings. Only folder names are shown, never files. Devices set to *Always accept* skip the prompt; others are asked.
+
+**Tested:**
+- 10 automated checks:
+  - it is off until turned on;
+  - only existing user folders are listed;
+  - no file names and no hidden folders are shown;
+  - paths can't leave the user folders;
+  - Decline writes nothing, and Accept lands in exactly the chosen folder;
+  - a trusted device skips the prompt;
+  - same-name files are kept as copies;
+  - turning the setting off stops sends at once;
+  - an unpaired device is refused.
+- A real-window test of the Windows folder browser against a test PC with sample folders (10 of 10 checks): the "turned off" message, browsing, Up, Send here, and the file arriving in the chosen folder.
+- The Windows screen checks.
+
+## 2.7.0: Android multi-file selection
+
+**Reported:** several files could not be sent from the phone; after choosing several, they weren't shown and couldn't be removed.
+
+**Found:** the phone's file picker already returned several files. The Home Send panel showed only one shortened line and had no remove button.
+
+**Fixed:** every chosen file is listed with its size and a remove button, plus Clear.
+
+**Tested on the phone:** chose 3 files, removed one, and sent 2 to a PC (both verified).
+
 ## 2.6.9: Ctrl+Shift+S ring (Windows)
 
 **Reported:** clicking outside the ring or pressing Escape did not close it. The device icons were too loud and the waves too strong.
