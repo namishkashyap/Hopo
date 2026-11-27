@@ -263,6 +263,63 @@ internal sealed class Dialogs(AppShell app)
         }
         finally { approvals.Release(); }
     }
+    /// <summary>Send to a folder: browses a paired PC's user folders (names only) and sends <paramref name="paths"/> straight into the chosen one.</summary>
+    public void SendToFolder(Peer peer, string[] paths)
+    {
+        Window window = Create("Send to a folder on " + peer.Name, 520);
+        StackPanel list = new();
+        TextBlock where = C.Text(peer.Name, 15, bold: true), status = C.Text("Reading folders…", 12, "Muted");
+        where.TextTrimming = TextTrimming.CharacterEllipsis;
+        status.TextWrapping = TextWrapping.Wrap;
+        string folder = "";
+        int load = 0;
+        Button up = null!, send = null!;
+        up = C.Button("Up one folder", () => _ = Open(folder.Contains('/') ? folder[..folder.LastIndexOf('/')] : ""), icon: "folder");
+        send = C.Button("Send here", () => { string target = folder; window.Close(); _ = SendAsync(target); }, true, "send");
+        up.IsEnabled = send.IsEnabled = false;
+        send.Margin = new(10, 0, 0, 0);
+        async Task Open(string path)
+        {
+            int mine = ++load;
+            status.Text = "Reading folders…";
+            try
+            {
+                SpaceEntry[] entries = await app.Engine.BrowseFoldersAsync(peer, path);
+                if (mine != load)
+                    return;
+                folder = path;
+                where.Text = path.Length == 0 ? peer.Name : peer.Name + " › " + path.Replace("/", " › ");
+                up.IsEnabled = send.IsEnabled = path.Length > 0;
+                list.Children.Clear();
+                status.Text = path.Length == 0 ? "Choose a folder. Only folder names are shown, never files." : entries.Length == 0 ? "No subfolders here. Send here, or go up." : "Open a subfolder, or send here.";
+                foreach (SpaceEntry entry in entries)
+                {
+                    Button row = C.Button(entry.Name, () => _ = Open(entry.Path), icon: "folder");
+                    row.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    row.HorizontalContentAlignment = HorizontalAlignment.Left;
+                    row.Margin = new(0, 0, 0, 6);
+                    list.Children.Add(row);
+                }
+            }
+            catch (Exception error) { if (mine == load) status.Text = TransferEngine.HumanError(error); }
+        }
+        async Task SendAsync(string target)
+        {
+            app.Navigate("Transfers");
+            app.Tell("Sending " + Format.Count(paths.Length, "item") + " to " + target + " on " + peer.Name + ". It asks there first unless it trusts this PC.");
+            try
+            {
+                await app.Engine.SendToFolderAsync(peer, target, paths);
+                app.Tell("Finished sending to " + target + " on " + peer.Name + ". See Transfers for the result.");
+            }
+            catch (Exception error) { app.Error(error); }
+        }
+        StackPanel body = C.Stack(C.Space(C.Text(Format.Count(paths.Length, "item") + " to send", 12, "Muted"), 6), C.Space(where, 6), C.Space(status, 14), C.Space(new ScrollViewer { Content = list, MaxHeight = 360, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, 16), C.Inline(up, send));
+        body.Margin = new(28);
+        window.Content = body;
+        window.Show();
+        _ = Open("");
+    }
     public async Task<bool> SyncAsync(SyncApproval request, CancellationToken token)
     {
         await approvals.WaitAsync(token);

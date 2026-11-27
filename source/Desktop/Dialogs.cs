@@ -66,6 +66,52 @@ internal sealed class Dialogs(Shell app)
         window.Content = Body(C.Stack(C.Text(label, 17, bold: true), input, C.Inline(C.Button("Cancel", () => window.Close(null)), C.Button("Save", () => window.Close(input.Text ?? ""), true))));
         return await ShowAsync<string?>(window);
     }
+    /// <summary>Send to a folder: browses a paired PC's user folders (names only) and returns the chosen one, or null when cancelled.</summary>
+    public async Task<string?> ChooseFolderAsync(Peer peer, int items)
+    {
+        Window window = Create("Send to a folder on " + peer.Name, 500);
+        StackPanel list = new()
+        {
+            Spacing = 6
+        };
+        TextBlock where = C.Text(peer.Name, 15, bold: true), status = C.Text("Reading folders…", 12, "Muted");
+        where.TextTrimming = TextTrimming.CharacterEllipsis;
+        status.TextWrapping = TextWrapping.Wrap;
+        string folder = "";
+        int load = 0;
+        Button up = null!, send = null!;
+        up = C.Button("Up", () => _ = Open(folder.Contains('/') ? folder[..folder.LastIndexOf('/')] : ""), icon: "folder");
+        send = C.Button("Send here", () => window.Close(folder), true, "send");
+        up.IsEnabled = send.IsEnabled = false;
+        async Task Open(string path)
+        {
+            int mine = ++load;
+            status.Text = "Reading folders…";
+            try
+            {
+                SpaceEntry[] entries = await app.Engine.BrowseFoldersAsync(peer, path);
+                if (mine != load)
+                    return;
+                folder = path;
+                where.Text = path.Length == 0 ? peer.Name : peer.Name + " › " + path.Replace("/", " › ");
+                up.IsEnabled = send.IsEnabled = path.Length > 0;
+                list.Children.Clear();
+                status.Text = path.Length == 0 ? "Choose a folder. Only folder names are shown, never files." : entries.Length == 0 ? "No subfolders here. Send here, or go up." : "Open a subfolder, or send here.";
+                foreach (SpaceEntry entry in entries)
+                {
+                    Button row = C.Button(entry.Name, () => _ = Open(entry.Path), icon: "folder");
+                    row.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    row.HorizontalContentAlignment = HorizontalAlignment.Left;
+                    list.Children.Add(row);
+                }
+            }
+            catch (Exception error) { if (mine == load) status.Text = TransferEngine.HumanError(error); }
+        }
+        Button cancel = C.Button("Cancel", () => window.Close(null));
+        window.Content = Body(C.Stack(C.Space(C.Text(Format.Count(items, "item") + " to send", 12, "Muted"), 6), C.Space(where, 6), C.Space(status, 14), C.Space(new ScrollViewer { Content = list, MaxHeight = 380 }, 16), C.Inline(cancel, up, send)));
+        _ = Open("");
+        return await ShowAsync<string?>(window);
+    }
     /// <summary>Returns the chosen device keys, an empty array for every paired PC, or null when cancelled.</summary>
     public async Task<string[]?> ChoosePeersAsync(string title, string[]? current)
     {

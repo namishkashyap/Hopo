@@ -867,6 +867,27 @@ internal sealed class Shell : IDisposable
             Navigate("Transfers");
         Tell("Transfer queued. The recipient must approve before any file bytes are sent.");
     }
+    /// <summary>Send to a folder: the selection goes straight into a folder chosen on a paired PC. False when nothing was chosen.</summary>
+    public async Task<bool> SendToFolderAsync(Peer peer, bool navigate = true)
+    {
+        string[] paths = Selection.Select(item => item.Path).ToArray();
+        if (paths.Length == 0 || await Dialogs.ChooseFolderAsync(peer, paths.Length) is not { Length: > 0 } target)
+            return false;
+        if (navigate)
+            Navigate("Transfers");
+        Tell("Sending to " + target + " on " + peer.Name + ". It asks there first unless it trusts this device.");
+        _ = SendAsync();
+        return true;
+        async Task SendAsync()
+        {
+            try
+            {
+                await Engine.SendToFolderAsync(peer, target, paths);
+                Tell("Finished sending to " + target + " on " + peer.Name + ". See Transfers for the result.");
+            }
+            catch (Exception error) { Error(error); }
+        }
+    }
     /// <summary>Sends the selection to a paired PC, or lists it on one approved phone's page only.</summary>
     public async Task SendToAsync(Peer? peer, BrowserDevice? device, bool navigate = true)
     {

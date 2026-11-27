@@ -552,6 +552,14 @@ internal sealed class HomePage : IPage
             Open(null);
         }, true);
         send.HorizontalAlignment = HorizontalAlignment.Stretch;
+        // Send to a folder: straight into a folder chosen on the selected PC.
+        Button intoFolder = C.Link("Or send to a folder on the PC…", async () =>
+        {
+            if (Chosen(Targets()) is { Peer: { } peer } && await app.SendToFolderAsync(peer, false))
+                Open(null);
+        });
+        intoFolder.HorizontalAlignment = HorizontalAlignment.Center;
+        intoFolder.Margin = new(0, 8, 0, 0);
         string shown = "", listed = "-";
         // Every chosen file is listed with its own remove button; a long list scrolls inside the panel.
         StackPanel list = new()
@@ -597,6 +605,10 @@ internal sealed class HomePage : IPage
             Target[] all = Targets();
             Target? chosen = Chosen(all);
             send.IsEnabled = app.Selection.Count > 0 && chosen != null;
+            intoFolder.IsEnabled = app.Selection.Count > 0;
+            intoFolder.IsVisible = chosen?.Peer != null;
+            if (chosen?.Peer != null)
+                intoFolder.Content = "Or send to a folder on " + chosen.Peer.Name + "…";
             string next = string.Join("|", all.Select(t => t.Label + t.Color + (ReferenceEquals(t, chosen) ? "*" : "")));
             if (next == shown)
                 return;
@@ -613,7 +625,7 @@ internal sealed class HomePage : IPage
                     fillSheet?.Invoke();
                 }));
         };
-        return Sheet("Send files", Drop(summary, C.AsyncButton("Choose files", async () => await app.AddSelectionsAsync(await app.PickFilesAsync("Choose files to send"), true), icon: "plus")), chosenFiles, Labelled("Send to", targets), send);
+        return Sheet("Send files", Drop(summary, C.AsyncButton("Choose files", async () => await app.AddSelectionsAsync(await app.PickFilesAsync("Choose files to send"), true), icon: "plus")), chosenFiles, Labelled("Send to", targets), send, intoFolder);
     }
     private StackPanel FolderSheet()
     {
@@ -835,6 +847,13 @@ internal sealed class SendPage : IPage
         send.MinHeight = 48;
         send.FontSize = 14;
         recipient.Children.Add(send);
+        if (chosen.Peer is { } folderPeer)
+        {
+            Button intoFolder = C.Link("Or send to a folder on " + folderPeer.Name + "…", () => app.SendToFolderAsync(folderPeer));
+            intoFolder.IsEnabled = app.Selection.Count > 0;
+            intoFolder.HorizontalAlignment = HorizontalAlignment.Center;
+            recipient.Children.Add(C.Space(intoFolder, 6, 8));
+        }
         recipient.Children.Add(C.Space(C.Text("Duplicate handling is chosen by the recipient. Existing files are never silently overwritten.", 11, "Muted"), 0, 12));
     }
     /// <summary>One recipient as a radio row: the selected one carries the amber outline.</summary>
