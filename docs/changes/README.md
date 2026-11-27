@@ -50,3 +50,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-26 | [Send ring closes reliably and looks calmer; public test log and roadmap](2026-11-26-send-ring-close-and-test-log.md) |
 | 2026-11-26 | [hopo Android: choose, see and remove several files](2026-11-26-android-multi-select.md) |
 | 2026-11-27 | [Send straight into a folder on another PC (drop folders)](2026-11-27-send-to-folder.md) |
+| 2026-11-27 | [Drop folders get their own menu page (2.7.1)](2026-11-27-drop-folders-page.md) |
