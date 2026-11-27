@@ -10,7 +10,7 @@ Older records: [VERIFICATION.md](../VERIFICATION.md) covers Lantoss 1.9 and earl
 
 | Method | What it checks | How |
 |---|---|---|
-| **Automated checks** | Pairing, encryption, transfers, file-name safety, sync, history, settings, the phone page | 319 checks in a custom test runner (`.\source\build.ps1 -Mode Test`), plus a browser-page test (`node .\source\tests\browser-ui.test.cjs`). They run on every change. |
+| **Automated checks** | Pairing, encryption, transfers, file-name safety, sync, history, settings, the phone page | 334 checks in a custom test runner (`.\source\build.ps1 -Mode Test`), plus a browser-page test (`node .\source\tests\browser-ui.test.cjs`). They run on every change. |
 | **Screen checks** | Every Windows page in Light and Dark, the Home panels, the Ctrl+Shift+S ring | The app draws each page to an image (`hopoUsers.exe --ui-regression`). Each image is checked for the right content, then looked at. |
 | **Break test** | Problem files, cancels, network drops, junk connections, speed, CPU | Two extra hopo engines on one PC send to each other. They are kept off the network, so no real device sees them. |
 | **Freeze probe** | Whether the window stops responding during transfers | hopo's real window runs off screen while files arrive. Every 15 ms a background thread times how long the window takes to answer, the same way Windows decides an app is "Not responding". |
@@ -23,21 +23,24 @@ Speeds below were measured on a home network: the phone on 2.4 GHz Wi-Fi (286 Mb
 
 ## 2.7.0: Send to a folder
 
-**New:** from a phone or PC, open a paired PC's folders (Desktop, Documents, Downloads, Pictures, Videos, Music and their subfolders), pick one, and send straight into it. The receiving PC turns it on in Settings. Only folder names are shown, never files. Devices set to *Always accept* skip the prompt; others are asked.
+**New:** the PC owner adds *drop folders* in Settings. From a phone or another PC, open one of them (or a folder inside it), or make a new folder there, and send straight into it. Only folder names are shown, never files. Devices set to *Always accept* skip the prompt; others are asked.
 
 **Tested:**
-- 10 automated checks:
-  - it is off until turned on;
-  - only existing user folders are listed;
+- 15 automated checks:
+  - nothing is shared until a drop folder is added, and a missing folder can't be added;
+  - only the drop folders are listed, once each; a deleted one is left out and doesn't block saving settings;
+  - two drop folders with the same name are told apart;
   - no file names and no hidden folders are shown;
-  - paths can't leave the user folders;
+  - paths can't leave the drop folders;
   - Decline writes nothing, and Accept lands in exactly the chosen folder;
   - a trusted device skips the prompt;
   - same-name files are kept as copies;
-  - turning the setting off stops sends at once;
+  - a new folder is made only on Accept, one level deep, with a valid name;
+  - removing a drop folder stops sends into it at once;
   - an unpaired device is refused.
-- A real-window test of the Windows folder browser against a test PC with sample folders (10 of 10 checks): the "turned off" message, browsing, Up, Send here, and the file arriving in the chosen folder.
-- The Windows screen checks.
+- A real-window test of the Windows folder browser against a test PC with sample folders (12 of 12 checks): the "no folders shared" message, browsing, Up, New folder (not made before sending), Send here, and the file arriving in the new folder.
+- The Windows screen checks, and the Settings drop folder list drawn to an image.
+- **Not yet tested on the phone:** the phone was not connected.
 
 ## 2.7.0: Android multi-file selection
 
