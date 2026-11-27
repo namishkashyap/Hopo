@@ -62,15 +62,62 @@ internal sealed class SettingsPage : IPage
             autoConnect = Check("Connect automatically to new computers (only when approval is off)", saved.AutoConnect),
             notifications = Check("Show notifications for incoming and finished transfers", saved.Notifications),
             senderFolders = Check("Save received files in a folder named after the sender", saved.SenderFolders),
-            folderAccess = Check("Let paired devices send straight into my folders (Desktop, Documents, Downloads, Pictures, Videos, Music)", saved.FolderAccess),
             discovery = Check("Let nearby computers discover this one", saved.Discoverable),
             protection = Check("Require an access code for new connections", saved.RequireConnectionCode),
             browser = Check("Enable phone/browser sharing on this Wi-Fi", saved.BrowserSharingEnabled),
             approve = Check("Ask before a new PC or phone connects", saved.ApproveNewDevices),
             https = Check("Encrypt the phone page (HTTPS)", saved.BrowserHttps);
         // A phone never hosts folders for other devices; it only sends into a PC's folders.
-        TextBlock folderAccessNote = C.Text("They see folder names only, never your files. Devices set to Always accept send without asking; others need your approval.", 11, "Muted");
-        folderAccess.IsVisible = folderAccessNote.IsVisible = !OperatingSystem.IsAndroid();
+        List<string> drops = [.. saved.DropFolders];
+        StackPanel dropList = new()
+        {
+            Margin = new(0, 6, 0, 8)
+        };
+        void SaveDrops()
+        {
+            app.Store.SetPreferences(app.Store.Preferences with
+            {
+                DropFolders = [.. drops]
+            });
+            drops = [.. app.Store.Preferences.DropFolders];
+            FillDrops();
+        }
+        void FillDrops()
+        {
+            dropList.Children.Clear();
+            if (drops.Count == 0)
+                dropList.Children.Add(C.Text("No folders shared yet.", 12, "Muted"));
+            foreach (string drop in drops)
+            {
+                Button remove = C.Small("Remove", () => { drops.Remove(drop); SaveDrops(); app.Tell(Path.GetFileName(drop) + " is no longer shared."); });
+                DockPanel.SetDock(remove, Dock.Right);
+                Control icon = C.Icon("folder", 15, "Primary");
+                icon.VerticalAlignment = VerticalAlignment.Center;
+                DockPanel.SetDock(icon, Dock.Left);
+                TextBlock path = C.Text(drop, 11, "Muted");
+                path.TextWrapping = TextWrapping.NoWrap;
+                path.TextTrimming = TextTrimming.CharacterEllipsis;
+                StackPanel text = C.Stack(C.Text(Path.GetFileName(drop), 13, bold: true), path);
+                text.VerticalAlignment = VerticalAlignment.Center;
+                text.Margin = new(8, 0, 8, 0);
+                ToolTip.SetTip(text, drop);
+                dropList.Children.Add(new DockPanel { Margin = new(0, 0, 0, 4), LastChildFill = true, Children = { remove, icon, text } });
+            }
+        }
+        FillDrops();
+        Button addDrop = C.AsyncButton("Add drop folder", async () =>
+        {
+            string[] picked = await app.PickFoldersAsync("Choose a folder phones and PCs can send into");
+            if (picked.Length == 0)
+                return;
+            foreach (string full in picked.Select(MetadataStore.CheckDropFolder))
+                if (!drops.Contains(full, StringComparer.OrdinalIgnoreCase))
+                    drops.Add(full);
+            SaveDrops();
+            app.Tell("Paired phones and PCs can now send into " + string.Join(", ", picked.Select(Path.GetFileName)) + ".");
+        }, icon: "folder");
+        StackPanel dropSection = C.Stack(C.Space(C.Text("Drop folders", 12, bold: true), 4), C.Text("Paired phones and PCs can send straight into these folders, or make a new folder inside one. They see folder names only, never your files. Devices set to Always accept send without asking; others need your approval.", 11, "Muted"), dropList, C.Space(addDrop, 15));
+        dropSection.IsVisible = !OperatingSystem.IsAndroid();
         string folder = saved.ReceiveFolder;
         TextBlock folderText = C.Text(OperatingSystem.IsAndroid() ? "Downloads/hopo, where the Files app and gallery show them" : folder, 12, "Muted");
         Button folderPicker = C.AsyncButton("Choose receive folder", async () =>
@@ -99,7 +146,7 @@ internal sealed class SettingsPage : IPage
                 AutoConnect = autoConnect.IsChecked == true,
                 CloseToTray = tray.IsChecked == true,
                 SenderFolders = senderFolders.IsChecked == true,
-                FolderAccess = folderAccess.IsChecked == true && !OperatingSystem.IsAndroid(),
+                DropFolders = [.. drops],
                 LocalName = address.Text ?? ""
             });
             app.Engine.ApplySavedPreferences();
@@ -108,7 +155,7 @@ internal sealed class SettingsPage : IPage
         }, true);
         StackPanel general = C.Stack(C.Heading("General"), C.Text("Profile picture", 12, bold: true), C.Space(pictureRow, 18, 8), C.Text("Name shown to other devices", 12, bold: true), name,
             C.Space(C.Text("Appearance", 12, bold: true), 8), C.Space(app.AppearancePicker(), 16), automatic, tray, autoConnect, notifications);
-        StackPanel transfers = C.Stack(C.Heading("Transfers"), C.Space(C.Text("Files are saved locally on this " + Shell.Platform, 12, bold: true), 9), C.Space(folderText, 15), C.Space(folderPicker, 17), C.Space(senderFolders, 15), C.Space(folderAccess, 4), C.Space(folderAccessNote, 15),
+        StackPanel transfers = C.Stack(C.Heading("Transfers"), C.Space(C.Text("Files are saved locally on this " + Shell.Platform, 12, bold: true), 9), C.Space(folderText, 15), C.Space(folderPicker, 17), C.Space(senderFolders, 15), dropSection,
             C.Text("Manual transfers require approval. Linked-folder sync uses its separate one-time host permission. Keep both is the default for manual duplicates.", 12, "Muted"));
         NetworkAdapter[] available = NetworkAdapter.Available();
         ComboBox adapter = new()

@@ -263,7 +263,7 @@ internal sealed class Dialogs(AppShell app)
         }
         finally { approvals.Release(); }
     }
-    /// <summary>Send to a folder: browses a paired PC's user folders (names only) and sends <paramref name="paths"/> straight into the chosen one.</summary>
+    /// <summary>Send to a folder: browses a paired PC's drop folders (names only) and sends <paramref name="paths"/> straight into the chosen one.</summary>
     public void SendToFolder(Peer peer, string[] paths)
     {
         Window window = Create("Send to a folder on " + peer.Name, 520);
@@ -274,10 +274,38 @@ internal sealed class Dialogs(AppShell app)
         string folder = "";
         int load = 0;
         Button up = null!, send = null!;
+        StackPanel newRow = null!;
         up = C.Button("Up one folder", () => _ = Open(folder.Contains('/') ? folder[..folder.LastIndexOf('/')] : ""), icon: "folder");
         send = C.Button("Send here", () => { string target = folder; window.Close(); _ = SendAsync(target); }, true, "send");
         up.IsEnabled = send.IsEnabled = false;
         send.Margin = new(10, 0, 0, 0);
+        TextBox newName = new()
+        {
+            MinWidth = 260,
+            Margin = new(0, 0, 10, 0),
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        AutomationProperties.SetName(newName, "New folder name");
+        Button make = C.Button("New folder", () => MakeFolder(), icon: "folder");
+        newRow = C.Space(C.Stack(C.Space(C.Text("Or name a new folder to make here:", 12, "Muted"), 5), C.Inline(newName, make)), 14);
+        newRow.Visibility = Visibility.Collapsed;
+        newName.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) MakeFolder(); };
+        void MakeFolder()
+        {
+            string name = newName.Text.Trim();
+            try
+            {
+                FileCatalog.ValidateSegment(name);
+            }
+            catch (InvalidDataException) { status.Text = "Type a folder name without \\ / : * ? \" < > |, up to 180 characters."; return; }
+            load++;
+            folder = folder + "/" + name;
+            newName.Text = "";
+            where.Text = peer.Name + " › " + folder.Replace("/", " › ");
+            list.Children.Clear();
+            newRow.Visibility = Visibility.Collapsed;
+            status.Text = "New folder. " + peer.Name + " makes it when the files are accepted.";
+        }
         async Task Open(string path)
         {
             int mine = ++load;
@@ -290,8 +318,9 @@ internal sealed class Dialogs(AppShell app)
                 folder = path;
                 where.Text = path.Length == 0 ? peer.Name : peer.Name + " › " + path.Replace("/", " › ");
                 up.IsEnabled = send.IsEnabled = path.Length > 0;
+                newRow.Visibility = path.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
                 list.Children.Clear();
-                status.Text = path.Length == 0 ? "Choose a folder. Only folder names are shown, never files." : entries.Length == 0 ? "No subfolders here. Send here, or go up." : "Open a subfolder, or send here.";
+                status.Text = path.Length == 0 ? "Choose a folder. Only folder names are shown, never files." : entries.Length == 0 ? "No subfolders here. Send here, make a new folder, or go up." : "Open a subfolder, make a new one, or send here.";
                 foreach (SpaceEntry entry in entries)
                 {
                     Button row = C.Button(entry.Name, () => _ = Open(entry.Path), icon: "folder");
@@ -314,7 +343,7 @@ internal sealed class Dialogs(AppShell app)
             }
             catch (Exception error) { app.Error(error); }
         }
-        StackPanel body = C.Stack(C.Space(C.Text(Format.Count(paths.Length, "item") + " to send", 12, "Muted"), 6), C.Space(where, 6), C.Space(status, 14), C.Space(new ScrollViewer { Content = list, MaxHeight = 360, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, 16), C.Inline(up, send));
+        StackPanel body = C.Stack(C.Space(C.Text(Format.Count(paths.Length, "item") + " to send", 12, "Muted"), 6), C.Space(where, 6), C.Space(status, 14), newRow, C.Space(new ScrollViewer { Content = list, MaxHeight = 360, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, 16), C.Inline(up, send));
         body.Margin = new(28);
         window.Content = body;
         window.Show();

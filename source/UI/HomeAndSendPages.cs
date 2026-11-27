@@ -1180,7 +1180,7 @@ internal sealed class SendPage : IPage
         intoFolder.IsEnabled = app.Selection.Count > 0;
         intoFolder.HorizontalAlignment = HorizontalAlignment.Stretch;
         intoFolder.Margin = new(0, 10, 0, 0);
-        intoFolder.ToolTip = "Pick a folder on that PC (Desktop, Documents, Downloads…) and send straight into it. That PC must allow it in Settings.";
+        intoFolder.ToolTip = "Pick one of the folders that PC shares (its drop folders), or make a new one inside, and send straight into it.";
         recipient.Children.Add(intoFolder);
         recipient.Children.Add(C.Space(C.Text("Duplicate handling is chosen by the recipient. Existing files are never silently overwritten.", 11, "Muted"), 0, 18));
     }

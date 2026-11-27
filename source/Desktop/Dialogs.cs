@@ -66,7 +66,7 @@ internal sealed class Dialogs(Shell app)
         window.Content = Body(C.Stack(C.Text(label, 17, bold: true), input, C.Inline(C.Button("Cancel", () => window.Close(null)), C.Button("Save", () => window.Close(input.Text ?? ""), true))));
         return await ShowAsync<string?>(window);
     }
-    /// <summary>Send to a folder: browses a paired PC's user folders (names only) and returns the chosen one, or null when cancelled.</summary>
+    /// <summary>Send to a folder: browses a paired PC's drop folders (names only) and returns the chosen one, or a new folder inside one, or null when cancelled.</summary>
     public async Task<string?> ChooseFolderAsync(Peer peer, int items)
     {
         Window window = Create("Send to a folder on " + peer.Name, 500);
@@ -80,9 +80,39 @@ internal sealed class Dialogs(Shell app)
         string folder = "";
         int load = 0;
         Button up = null!, send = null!;
+        DockPanel newRow = null!;
         up = C.Button("Up", () => _ = Open(folder.Contains('/') ? folder[..folder.LastIndexOf('/')] : ""), icon: "folder");
         send = C.Button("Send here", () => window.Close(folder), true, "send");
         up.IsEnabled = send.IsEnabled = false;
+        TextBox newName = new()
+        {
+            Watermark = "New folder name",
+            MinWidth = 180,
+            Margin = new(0, 0, 8, 0)
+        };
+        Button make = C.Button("New folder", () => MakeFolder(), icon: "folder");
+        DockPanel.SetDock(make, Dock.Right);
+        newRow = C.Space(new DockPanel { LastChildFill = true, Children = { make, newName } }, 14);
+        newRow.IsVisible = false;
+        newName.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) MakeFolder(); };
+        void MakeFolder()
+        {
+            string name = (newName.Text ?? "").Trim();
+            try
+            {
+                FileCatalog.ValidateSegment(name);
+                if (name.IndexOfAny(['\\', ':', '*', '?', '"', '<', '>', '|']) >= 0)
+                    throw new InvalidDataException(name);
+            }
+            catch (InvalidDataException) { status.Text = "Type a folder name without \\ / : * ? \" < > |, up to 180 characters."; return; }
+            load++;
+            folder = folder + "/" + name;
+            newName.Text = "";
+            where.Text = peer.Name + " › " + folder.Replace("/", " › ");
+            list.Children.Clear();
+            newRow.IsVisible = false;
+            status.Text = "New folder. " + peer.Name + " makes it when the files are accepted.";
+        }
         async Task Open(string path)
         {
             int mine = ++load;
@@ -95,8 +125,9 @@ internal sealed class Dialogs(Shell app)
                 folder = path;
                 where.Text = path.Length == 0 ? peer.Name : peer.Name + " › " + path.Replace("/", " › ");
                 up.IsEnabled = send.IsEnabled = path.Length > 0;
+                newRow.IsVisible = path.Length > 0;
                 list.Children.Clear();
-                status.Text = path.Length == 0 ? "Choose a folder. Only folder names are shown, never files." : entries.Length == 0 ? "No subfolders here. Send here, or go up." : "Open a subfolder, or send here.";
+                status.Text = path.Length == 0 ? "Choose a folder. Only folder names are shown, never files." : entries.Length == 0 ? "No subfolders here. Send here, make a new folder, or go up." : "Open a subfolder, make a new one, or send here.";
                 foreach (SpaceEntry entry in entries)
                 {
                     Button row = C.Button(entry.Name, () => _ = Open(entry.Path), icon: "folder");
@@ -108,7 +139,7 @@ internal sealed class Dialogs(Shell app)
             catch (Exception error) { if (mine == load) status.Text = TransferEngine.HumanError(error); }
         }
         Button cancel = C.Button("Cancel", () => window.Close(null));
-        window.Content = Body(C.Stack(C.Space(C.Text(Format.Count(items, "item") + " to send", 12, "Muted"), 6), C.Space(where, 6), C.Space(status, 14), C.Space(new ScrollViewer { Content = list, MaxHeight = 380 }, 16), C.Inline(cancel, up, send)));
+        window.Content = Body(C.Stack(C.Space(C.Text(Format.Count(items, "item") + " to send", 12, "Muted"), 6), C.Space(where, 6), C.Space(status, 14), newRow, C.Space(new ScrollViewer { Content = list, MaxHeight = 380 }, 16), C.Inline(cancel, up, send)));
         _ = Open("");
         return await ShowAsync<string?>(window);
     }
