@@ -8,7 +8,7 @@ namespace Lantoss.Desktop;
 internal sealed class DropFoldersPage : IPage
 {
     private readonly Shell app;
-    private readonly StackPanel dropList = new(), devices = new();
+    private readonly StackPanel dropList = new(), devices = new(), trust = new();
     public Control View
     {
         get;
@@ -25,7 +25,8 @@ internal sealed class DropFoldersPage : IPage
         {
             Button add = C.AsyncButton("Add drop folder", AddFoldersAsync, true, "plus");
             StackPanel share = C.Stack(C.Heading("Folders on this " + Shell.Platform + " that others can send into"), C.Space(C.Text("Paired phones and PCs see these folders by name, open the folders inside them, and can make a new folder there. They never see your files. Devices set to Always accept send without asking; others need your approval.", 12, "Muted"), 14), C.Space(dropList, 14), add);
-            View = C.Stack(C.Header("Share", "Drop folders", "Send files straight into a folder you choose, from a phone or another computer."), C.Space(C.Columns(C.Card(share), sendCard, 420), 20, 20));
+            StackPanel allow = C.Stack(C.Heading("Who can send without asking"), C.Space(C.Text("Files from a device set to Always accept go straight into the folder it chose, with no window on this " + Shell.Platform + ". Other devices ask first.", 12, "Muted"), 14), trust);
+            View = C.Stack(C.Header("Share", "Drop folders", "Send files straight into a folder you choose, from a phone or another computer."), C.Space(C.Columns(C.Card(share), sendCard, 420), 20, 20), C.Space(C.Card(allow), 20));
         }
     }
     public void Refresh()
@@ -42,6 +43,11 @@ internal sealed class DropFoldersPage : IPage
             devices.Children.Add(C.Stack(C.Space(C.Text("No paired PCs yet. Pair one on the Devices page first.", 13, "Muted"), 10), C.Button("Open Devices", () => app.Navigate("Devices"), icon: "devices")));
         foreach (Peer peer in paired)
             devices.Children.Add(Row("devices", peer.Name, peer.Online ? "Online" : "Offline: open hopo on it first", peer.Online ? "Success" : "Muted", C.Small("Folder", () => ChooseAndSendAsync(peer, true)), C.Small("Files", () => ChooseAndSendAsync(peer, false))));
+        trust.Children.Clear();
+        if (paired.Length == 0)
+            trust.Children.Add(C.Text("No paired devices yet.", 13, "Muted"));
+        foreach (Peer peer in paired)
+            trust.Children.Add(Row(peer.Trusted ? "check" : "devices", peer.Name, peer.Trusted ? "Always accept: files arrive without asking" : "Asks before saving files", peer.Trusted ? "Success" : "Muted", C.Small(peer.Trusted ? "Ask every time" : "Always accept", () => app.Engine.EditPeer(peer with { Trusted = !peer.Trusted }))));
     }
     private static DockPanel Row(string icon, string title, string detail, string detailColor, params Button[] actions)
     {

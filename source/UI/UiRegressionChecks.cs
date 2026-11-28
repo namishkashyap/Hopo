@@ -38,8 +38,8 @@ internal static class UiRegressionChecks
             app.ApplyTheme(theme);
             app.Navigate("Drop folders");
             app.Render(Path.Combine(output, theme + "-Drop-folders.png"), theme == "Dark" ? 1000 : 1440, theme == "Dark" ? 720 : 900);
-            if (!Descendants<TextBlock>(app.Window.Content as DependencyObject ?? app.Window).Any(text => text.Text == "Folders on this PC that others can send into") || !Descendants<TextBlock>(app.Window.Content as DependencyObject ?? app.Window).Any(text => text.Text == "NK"))
-                throw new InvalidDataException("Drop folders must show the shared-folder list and the paired devices to send into.");
+            if (!Descendants<TextBlock>(app.Window.Content as DependencyObject ?? app.Window).Any(text => text.Text == "Folders on this PC that others can send into") || !Descendants<TextBlock>(app.Window.Content as DependencyObject ?? app.Window).Any(text => text.Text == "NK") || !Descendants<TextBlock>(app.Window.Content as DependencyObject ?? app.Window).Any(text => text.Text == "Who can send without asking"))
+                throw new InvalidDataException("Drop folders must show the shared-folder list , the paired devices to send into and who can send without asking.");
             passed++;
             app.Navigate("Shared Spaces");
             app.Render(Path.Combine(output, theme + "-Shared-Spaces-NK.png"), theme == "Dark" ? 1000 : 1440, theme == "Dark" ? 720 : 900);

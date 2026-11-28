@@ -58,7 +58,7 @@ internal sealed class DevicesPage : IPage
                 favorite.Margin = new(7, 0, 0, 0);
                 actions.Children.Add(favorite);
                 // A trusted PC sends files without the accept prompt.
-                Button trusted = C.Small(peer.Trusted ? "Stop trusting" : "Trust", () => app.Engine.EditPeer(peer with { Trusted = !peer.Trusted }));
+                Button trusted = C.Small(peer.Trusted ? "Ask every time" : "Always accept files", () => app.Engine.EditPeer(peer with { Trusted = !peer.Trusted }));
                 trusted.Margin = new(7, 0, 0, 0);
                 actions.Children.Add(trusted);
                 Button rename = C.Small("Rename", () => Rename(peer));

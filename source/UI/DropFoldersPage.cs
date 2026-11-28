@@ -6,7 +6,7 @@ namespace Lantoss.UI;
 internal sealed class DropFoldersPage : IPage
 {
     private readonly AppShell app;
-    private readonly StackPanel dropList = new(), devices = new();
+    private readonly StackPanel dropList = new(), devices = new(), trust = new();
     public FrameworkElement View
     {
         get;
@@ -17,7 +17,8 @@ internal sealed class DropFoldersPage : IPage
         Button add = C.Button("Add drop folder", AddFolders, true, "plus");
         StackPanel share = C.Stack(C.Heading("Folders on this PC that others can send into"), C.Space(C.Text("Paired phones and PCs see these folders by name, open the folders inside them, and can make a new folder there. They never see your files. Devices set to Always accept send without asking; others need your approval.", 12, "Muted"), 14), C.Space(dropList, 14), add);
         StackPanel send = C.Stack(C.Heading("Send into a folder on another device"), C.Space(C.Text("Choose Files or Folder next to a device, then open the folder to put them in, or create a new one there. That device must have added drop folders on its own Drop folders page.", 12, "Muted"), 14), devices);
-        View = C.Stack(C.Hero("hopo", "Drop folders", "Send files straight into a folder you choose, from a phone or another PC."), C.Space(C.Columns(C.Card(share), C.Card(send), 420), 20),
+        StackPanel allow = C.Stack(C.Heading("Who can send without asking"), C.Space(C.Text("Files from a device set to Always accept go straight into the folder it chose, with no window on this PC. Other devices ask first.", 12, "Muted"), 14), trust);
+        View = C.Stack(C.Hero("hopo", "Drop folders", "Send files straight into a folder you choose, from a phone or another PC."), C.Space(C.Columns(C.Card(share), C.Card(send), 420), 20), C.Space(C.Card(allow), 20),
             C.Space(C.Note("How to send from your phone", "On the phone, open hopo, open the menu and choose Drop folders. Pick this PC, choose files, open a folder and tap Send here."), 0, 4));
     }
     public void Refresh()
@@ -59,6 +60,21 @@ internal sealed class DropFoldersPage : IPage
             icon.VerticalAlignment = VerticalAlignment.Center;
             DockPanel.SetDock(icon, Dock.Left);
             devices.Children.Add(new DockPanel { Margin = new(0, 0, 0, 10), LastChildFill = true, Children = { chooseFolder, choose, icon, text } });
+        }
+        trust.Children.Clear();
+        if (paired.Length == 0)
+            trust.Children.Add(C.Text("No paired devices yet.", 13, "Muted"));
+        foreach (Peer peer in paired)
+        {
+            Button toggle = C.Small(peer.Trusted ? "Ask every time" : "Always accept", () => app.Engine.EditPeer(peer with { Trusted = !peer.Trusted }));
+            DockPanel.SetDock(toggle, Dock.Right);
+            StackPanel text = C.Stack(C.Text(peer.Name, 14, bold: true), C.Text(peer.Trusted ? "Always accept: files arrive without asking" : "Asks before saving files", 11, peer.Trusted ? "Success" : "Muted"));
+            text.VerticalAlignment = VerticalAlignment.Center;
+            text.Margin = new(10, 0, 10, 0);
+            FrameworkElement icon = C.Icon(peer.Trusted ? "check" : "devices", 20, "Primary");
+            icon.VerticalAlignment = VerticalAlignment.Center;
+            DockPanel.SetDock(icon, Dock.Left);
+            trust.Children.Add(new DockPanel { Margin = new(0, 0, 0, 10), LastChildFill = true, Children = { toggle, icon, text } });
         }
     }
     private void AddFolders()

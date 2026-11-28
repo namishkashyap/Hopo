@@ -223,15 +223,28 @@ internal sealed class Dialogs(AppShell app)
                     accepted = true;
                     window.Close();
                 }, true, "download");
+                // Always accept takes these files and trusts the paired device, so its next sends (into drop folders too) arrive without this window.
+                Button always = C.Button("Always accept from " + (app.Store.Trusted(request.Fingerprint)?.Name ?? request.PeerName), () =>
+                {
+                    if (app.Store.Trusted(request.Fingerprint) is Peer peer)
+                        app.Engine.EditPeer(peer with
+                        {
+                            Trusted = true
+                        });
+                    accepted = true;
+                    window.Close();
+                }, false, "check");
+                always.Visibility = !request.Browser && request.Fingerprint.Length > 0 && app.Store.Trusted(request.Fingerprint) != null ? Visibility.Visible : Visibility.Collapsed;
+                always.Margin = new(10, 0, 0, 0);
                 void CheckSpace()
                 {
                     try
                     {
                         long available = FileCatalog.FreeSpace(folder);
                         free.Text = Format.Bytes(available) + " available · " + Format.Bytes(request.Manifest.TotalBytes) + " requested";
-                        accept.IsEnabled = available >= request.Manifest.TotalBytes + 64L * 1024 * 1024;
+                        accept.IsEnabled = always.IsEnabled = available >= request.Manifest.TotalBytes + 64L * 1024 * 1024;
                     }
-                    catch (IOException) { free.Text = "Destination drive is unavailable. Choose another folder."; accept.IsEnabled = false; }
+                    catch (IOException) { free.Text = "Destination drive is unavailable. Choose another folder."; accept.IsEnabled = always.IsEnabled = false; }
                 }
                 Button choose = C.Small("Change folder", () => { OpenFolderDialog picker = new() { Title = "Choose the receive folder" }; if (picker.ShowDialog(window) == true) { FileCatalog.CheckSafeDirectory(picker.FolderName); folder = picker.FolderName; location.Text = folder; CheckSpace(); } });
                 choose.IsEnabled = !request.FixedFolder;
@@ -252,7 +265,7 @@ internal sealed class Dialogs(AppShell app)
                 StackPanel body = C.Stack(C.Space(C.Text("Incoming files", 23, bold: true), 14), C.Space(C.Card(C.Person(request.PeerName, request.Picture, sender, 48), 16), 14),
                     C.Space(C.Text($"{Format.Count(request.Manifest.FileCount, "file")} · {Format.Count(request.Manifest.FolderCount, "folder")} · {Format.Bytes(request.Manifest.TotalBytes)}", 13, "Muted"), 18), warnings, C.Space(C.Card(names), 18),
                     C.Space(C.Badge(request.Browser ? "Phone/browser · approved on this PC" : request.KeyVerified ? "Paired device · public key verified" : "Connected PC · saved public key", "Success", "SuccessSoft"), 16), C.Space(C.Text("SAVE TO", 10, "Muted", true), 7), C.Space(location, 10), C.Space(choose, 10), C.Space(free, 18), C.Text("IF FILES ALREADY EXIST", 10, "Muted", true), duplicates,
-                    C.Space(C.Text(request.FixedFolder ? "Files are saved into this shared folder and become visible to its connected devices. Existing files are kept. Browser transfers use HTTP; native PC transfers use TLS." : request.Browser ? "Browser uploads keep both copies. Files are saved atomically and never opened or shared automatically. Local HTTP is not encrypted." : "Files are checksum-verified before saving. Received files are never opened or shared automatically.", 11, "Muted"), 20), C.Inline(decline, accept));
+                    C.Space(C.Text(request.FixedFolder ? "Files are saved into this shared folder and become visible to its connected devices. Existing files are kept. Browser transfers use HTTP; native PC transfers use TLS." : request.Browser ? "Browser uploads keep both copies. Files are saved atomically and never opened or shared automatically. Local HTTP is not encrypted." : "Files are checksum-verified before saving. Received files are never opened or shared automatically.", 11, "Muted"), 20), C.Inline(decline, always, accept));
                 body.Margin = new(28);
                 window.Content = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
                 CheckSpace();
