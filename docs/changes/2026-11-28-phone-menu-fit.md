@@ -6,6 +6,6 @@ On the phone, the menu ran past the screen, so a scrollbar showed over the close
 
 ## Items
 
-- [ ] Size the menu to the space between the phone's status bar and navigation bar, so the device card, storage and appearance sit at the foot with no scrolling.
-- [ ] Hide the menu's scrollbar on the phone (it still scrolls if a screen is too short, such as in landscape).
-- [ ] Android app version 2.7.3 (version code 11); build the APK and check the menu on the phone.
+- [x] Size the menu to the space between the phone's status bar and navigation bar, so the device card, storage and appearance sit at the foot with no scrolling.
+- [x] Hide the menu's scrollbar on the phone (it still scrolls if a screen is too short, such as in landscape).
+- [x] Android app version 2.7.3 (version code 11); build the APK and check the menu on the phone. Built and installed on the phone; the phone was locked or in use, so the owner checks the menu.
