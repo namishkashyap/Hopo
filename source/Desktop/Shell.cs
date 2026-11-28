@@ -548,16 +548,16 @@ internal sealed class Shell : IDisposable
         StackPanel bottom = C.Stack(C.Space(new Border { Child = thisDevice, Padding = new(12), CornerRadius = new(14), Background = Theme.Brush("Text/4"), BorderBrush = Theme.Brush("Text/6"), BorderThickness = new(1) }, 14, 12),
             C.Space(storage, 8), C.Space(storageBar, 10), C.Space(C.Text("No account. No cloud. · hopo 2.0", 12, "Muted"), 14), theme);
         bottom.Margin = new(4, 0, 4, 2);
-        // The bottom block sits at the foot of the panel when it fits and scrolls with the rows when the window is short.
+        // The bottom block sits at the foot of the panel when it fits and scrolls with the rows when the window is short. The phone's status and navigation bars are left out of the height.
         Grid layout = new()
         {
             RowDefinitions = new RowDefinitions("*,Auto"),
-            MinHeight = Math.Max(0, Root.Bounds.Height - 28 - 30)
+            MinHeight = Math.Max(0, Root.Bounds.Height - safeArea.Top - safeArea.Bottom - 28 - 30)
         };
         Grid.SetRow(bottom, 1);
         layout.Children.Add(items);
         layout.Children.Add(bottom);
-        menuPanel.Child = new ScrollViewer { Content = layout, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        menuPanel.Child = new ScrollViewer { Content = layout, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = OperatingSystem.IsAndroid() ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto };
         UpdateStatus();
         menuPanel.Width = Fit(380);
         menu.IsVisible = true;
