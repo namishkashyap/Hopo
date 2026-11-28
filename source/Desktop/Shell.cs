@@ -30,14 +30,14 @@ internal interface IPage
 /// </summary>
 internal sealed class Shell : IDisposable
 {
-    public static readonly string[] Pages = ["Home", "Send", "Transfers", "Devices", "Phone & browser", "Text & links", "Shared Spaces", "Sync", "History", "Settings"];
+    public static readonly string[] Pages = ["Home", "Send", "Transfers", "Devices", "Phone & browser", "Text & links", "Shared Spaces", "Drop folders", "Sync", "History", "Settings"];
     // Menu rows: page, title, subtitle (Share group only) and icon.
 #if ANDROID
     // A phone cannot host the phone page, share folders or sync them; those pages stay on computers.
-    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text")];
+    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Drop folders", "Drop folders", "Send into a folder on your PC", "download"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text")];
     private static readonly (string Page, string Icon)[] ManageMenu = [("Transfers", "transfer"), ("Devices", "devices"), ("History", "history"), ("Settings", "settings")];
 #else
-    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Shared Spaces", "Share a folder", "Shared spaces for your PCs", "folder"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text"), ("Phone & browser", "Phone & browser", "Scan a QR code, no app needed", "phone")];
+    private static readonly (string Page, string Title, string Detail, string Icon)[] ShareMenu = [("Send", "Send files", "To a PC on your network", "send"), ("Drop folders", "Drop folders", "Send straight into a chosen folder", "download"), ("Shared Spaces", "Share a folder", "Shared spaces for your PCs", "folder"), ("Text & links", "Share text or a link", "Notes, addresses, URLs", "text"), ("Phone & browser", "Phone & browser", "Scan a QR code, no app needed", "phone")];
     private static readonly (string Page, string Icon)[] ManageMenu = [("Transfers", "transfer"), ("Devices", "devices"), ("Sync", "sync"), ("History", "history"), ("Settings", "settings")];
 #endif
     private static readonly string[] Searchable = ["Send", "Transfers", "Devices", "Text & links", "Shared Spaces", "History"];
@@ -82,6 +82,11 @@ internal sealed class Shell : IDisposable
     }
     /// <summary>Copies a picked Android document (a content URI) into the app's cache so it can be sent; set by the Android app.</summary>
     public static Func<IStorageFile, Task<string?>>? ImportHook
+    {
+        get; set;
+    }
+    /// <summary>Copies a picked folder with its subfolders into the app's cache (Android).</summary>
+    public static Func<IStorageFolder, Action<string>, Task<string?>>? FolderImportHook
     {
         get; set;
     }
@@ -172,7 +177,7 @@ internal sealed class Shell : IDisposable
         Engine.Sync.Changed += () => Ui(() => { if (CurrentPage == "Sync") Later(); });
         Engine.Browser.Notes.Changed += () => Ui(() => { if (CurrentPage == "Text & links") Later(); });
         Engine.Status += message => Ui(() => Tell(message));
-        Engine.PeersChanged += () => Ui(() => { if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces" or "Text & links") Later(); });
+        Engine.PeersChanged += () => Ui(() => { if (CurrentPage is "Home" or "Devices" or "Send" or "Shared Spaces" or "Text & links" or "Drop folders") Later(); });
         Engine.Browser.Changed += () => Ui(() => { if (CurrentPage is "Phone & browser" or "Shared Spaces" or "Devices" or "Home") Later(); });
         Engine.Browser.ApprovalRequested += device => Ui(() => { string text = device.Label + " wants to connect. Open hopo to allow it."; Tell(text); if (Store.Preferences.Notifications) Notify("New phone or browser", text); });
         Engine.Transfers.Changed += _ => Ui(() => { if (CurrentPage is "Home" or "Transfers" or "History") Later(); });
@@ -183,6 +188,7 @@ internal sealed class Shell : IDisposable
             if (Store.Preferences.Notifications)
                 Notify(record.Direction == "Received" ? "Files received" : "Transfer finished", $"{Format.Count(record.FileCount, "file")} · {record.PeerName}");
         });
+        Root.AttachedToVisualTree += (_, _) => WatchKeyboard();
         Root.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape && menu.IsVisible)
@@ -635,6 +641,7 @@ internal sealed class Shell : IDisposable
             "Phone & browser" => new PhonePage(this),
             "Text & links" => new NotesPage(this),
             "Shared Spaces" => new SpacesPage(this),
+            "Drop folders" => new DropFoldersPage(this),
             "Sync" => new SyncPage(this),
             "History" => new HistoryPage(this),
             _ => new SettingsPage(this)
@@ -822,7 +829,23 @@ internal sealed class Shell : IDisposable
 #endif
     }
     public async Task PickFilesAsync() => await AddSelectionsAsync(await PickFilesAsync("Choose files to send"));
-    public async Task PickFoldersAsync() => await AddSelectionsAsync(await PickFoldersAsync("Choose folders to send", true));
+    /// <summary>Folders to send. On Android the chosen folder is copied, with its subfolders, into the app's cache first, as picked files are.</summary>
+    public async Task<string[]> PickFoldersToSendAsync()
+    {
+#if ANDROID
+        IReadOnlyList<IStorageFolder> folders = await Storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose a folder to send" });
+        List<string> copied = [];
+        foreach (IStorageFolder folder in folders)
+            if (FolderImportHook != null && await FolderImportHook(folder, text => Tell(text)) is string path)
+                copied.Add(path);
+        if (copied.Count < folders.Count)
+            Tell("That folder could not be read. Choose files instead.");
+        return [.. copied];
+#else
+        return await PickFoldersAsync("Choose folders to send", true);
+#endif
+    }
+    public async Task PickFoldersAsync() => await AddSelectionsAsync(await PickFoldersToSendAsync());
     /// <summary>Adds files and folders to the selection, then opens Send unless <paramref name="stay"/> keeps the current page (the Home Send panel).</summary>
     public async Task AddSelectionsAsync(IEnumerable<string> paths, bool stay = false)
     {
@@ -866,6 +889,49 @@ internal sealed class Shell : IDisposable
         if (navigate)
             Navigate("Transfers");
         Tell("Transfer queued. The recipient must approve before any file bytes are sent.");
+    }
+    /// <summary>Send to a folder: the selection goes straight into a folder chosen on a paired PC. False when nothing was chosen.</summary>
+    private Avalonia.Controls.Platform.IInputPane? keyboard;
+    /// <summary>On a phone the on-screen keyboard covers the bottom of the screen: lift everything by its height and scroll the box being typed in into view.</summary>
+    private void WatchKeyboard()
+    {
+        // Android rebuilds the window after a lock or rotation: follow the new keyboard and drop the old one.
+        Avalonia.Controls.Platform.IInputPane? pane = TopLevel.GetTopLevel(Root)?.InputPane;
+        if (ReferenceEquals(pane, keyboard))
+            return;
+        if (keyboard != null)
+            keyboard.StateChanged -= KeyboardChanged;
+        keyboard = pane;
+        Root.Margin = default;
+        if (pane != null)
+            pane.StateChanged += KeyboardChanged;
+    }
+    private void KeyboardChanged(object? sender, Avalonia.Controls.Platform.InputPaneStateEventArgs e)
+    {
+        double covered = e.NewState == Avalonia.Controls.Platform.InputPaneState.Open ? Math.Max(0, Root.Bounds.Height + Root.Margin.Bottom - e.EndRect.Top) : 0;
+        Root.Margin = new(0, 0, 0, covered);
+        if (covered > 0 && TopLevel.GetTopLevel(Root)?.FocusManager?.GetFocusedElement() is Control focused)
+            Dispatcher.UIThread.Post(() => focused.BringIntoView(), DispatcherPriority.Background);
+    }
+    public Task<bool> SendToFolderAsync(Peer peer, bool navigate = true) => SendToFolderAsync(peer, [.. Selection.Select(item => item.Path)], navigate);
+    public async Task<bool> SendToFolderAsync(Peer peer, string[] paths, bool navigate = true)
+    {
+        if (paths.Length == 0 || await Dialogs.ChooseFolderAsync(peer, paths.Length) is not { Length: > 0 } target)
+            return false;
+        if (navigate)
+            Navigate("Transfers");
+        Tell("Sending to " + target + " on " + peer.Name + ". It asks there first unless it trusts this device.");
+        _ = SendAsync();
+        return true;
+        async Task SendAsync()
+        {
+            try
+            {
+                await Engine.SendToFolderAsync(peer, target, paths);
+                Tell("Finished sending to " + target + " on " + peer.Name + ". See Transfers for the result.");
+            }
+            catch (Exception error) { Error(error); }
+        }
     }
     /// <summary>Sends the selection to a paired PC, or lists it on one approved phone's page only.</summary>
     public async Task SendToAsync(Peer? peer, BrowserDevice? device, bool navigate = true)

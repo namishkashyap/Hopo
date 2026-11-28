@@ -67,6 +67,7 @@ internal sealed class SettingsPage : IPage
             browser = Check("Enable phone/browser sharing on this Wi-Fi", saved.BrowserSharingEnabled),
             approve = Check("Ask before a new PC or phone connects", saved.ApproveNewDevices),
             https = Check("Encrypt the phone page (HTTPS)", saved.BrowserHttps);
+        // A phone never hosts folders for other devices; it only sends into a PC's folders.
         string folder = saved.ReceiveFolder;
         TextBlock folderText = C.Text(OperatingSystem.IsAndroid() ? "Downloads/hopo, where the Files app and gallery show them" : folder, 12, "Muted");
         Button folderPicker = C.AsyncButton("Choose receive folder", async () =>
@@ -95,6 +96,7 @@ internal sealed class SettingsPage : IPage
                 AutoConnect = autoConnect.IsChecked == true,
                 CloseToTray = tray.IsChecked == true,
                 SenderFolders = senderFolders.IsChecked == true,
+                DropFolders = app.Store.Preferences.DropFolders,
                 LocalName = address.Text ?? ""
             });
             app.Engine.ApplySavedPreferences();
@@ -103,8 +105,7 @@ internal sealed class SettingsPage : IPage
         }, true);
         StackPanel general = C.Stack(C.Heading("General"), C.Text("Profile picture", 12, bold: true), C.Space(pictureRow, 18, 8), C.Text("Name shown to other devices", 12, bold: true), name,
             C.Space(C.Text("Appearance", 12, bold: true), 8), C.Space(app.AppearancePicker(), 16), automatic, tray, autoConnect, notifications);
-        StackPanel transfers = C.Stack(C.Heading("Transfers"), C.Space(C.Text("Files are saved locally on this " + Shell.Platform, 12, bold: true), 9), C.Space(folderText, 15), C.Space(folderPicker, 17), C.Space(senderFolders, 15),
-            C.Text("Manual transfers require approval. Linked-folder sync uses its separate one-time host permission. Keep both is the default for manual duplicates.", 12, "Muted"));
+        StackPanel transfers = C.Stack(C.Heading("Transfers"), C.Space(C.Text("Files are saved locally on this " + Shell.Platform, 12, bold: true), 9), C.Space(folderText, 15), C.Space(folderPicker, 17), C.Space(senderFolders, 15), C.Text("Manual transfers require approval. Linked-folder sync uses its separate one-time host permission. Keep both is the default for manual duplicates.", 12, "Muted"));
         NetworkAdapter[] available = NetworkAdapter.Available();
         ComboBox adapter = new()
         {

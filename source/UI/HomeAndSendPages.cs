@@ -1176,6 +1176,12 @@ internal sealed class SendPage : IPage
         send.IsEnabled = app.Selection.Count > 0;
         send.HorizontalAlignment = HorizontalAlignment.Stretch;
         recipient.Children.Add(send);
+        Button intoFolder = C.Button("Send to a folder…", () => { if (picker.SelectedItem is Peer peer) app.Dialogs.SendToFolder(peer, app.Selection.Select(item => item.Path).ToArray()); }, icon: "folder");
+        intoFolder.IsEnabled = app.Selection.Count > 0;
+        intoFolder.HorizontalAlignment = HorizontalAlignment.Stretch;
+        intoFolder.Margin = new(0, 10, 0, 0);
+        intoFolder.ToolTip = "Pick one of the folders that PC shares (its drop folders), or make a new one inside, and send straight into it.";
+        recipient.Children.Add(intoFolder);
         recipient.Children.Add(C.Space(C.Text("Duplicate handling is chosen by the recipient. Existing files are never silently overwritten.", 11, "Muted"), 0, 18));
     }
     private async void SendToPhone(BrowserDevice device)

@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -64,6 +65,108 @@ internal sealed class Dialogs(Shell app)
             Margin = new(0, 10, 0, 18)
         };
         window.Content = Body(C.Stack(C.Text(label, 17, bold: true), input, C.Inline(C.Button("Cancel", () => window.Close(null)), C.Button("Save", () => window.Close(input.Text ?? ""), true))));
+        return await ShowAsync<string?>(window);
+    }
+    /// <summary>Send to a folder: browses a paired PC's drop folders (names only) and returns the chosen one, or a new folder inside one, or null when cancelled.</summary>
+    public async Task<string?> ChooseFolderAsync(Peer peer, int items)
+    {
+        Window window = Create("Send to a folder on " + peer.Name, 500);
+        StackPanel list = new()
+        {
+            Spacing = 6
+        };
+        TextBlock where = C.Text(peer.Name, 15, bold: true), status = C.Text("Reading folders…", 12, "Muted");
+        where.TextTrimming = TextTrimming.CharacterEllipsis;
+        status.TextWrapping = TextWrapping.Wrap;
+        string folder = "";
+        int load = 0;
+        Button up = null!, send = null!;
+        DockPanel newRow = null!;
+        up = C.Button("Up", () => _ = Open(folder.Contains('/') ? folder[..folder.LastIndexOf('/')] : ""), icon: "folder");
+        send = C.Button("Send here", () => window.Close(folder), true, "send");
+        up.IsEnabled = send.IsEnabled = false;
+        TextBox newName = new()
+        {
+            PlaceholderText = "New folder name, e.g. Projects/2026",
+            MinWidth = 140,
+            Margin = new(0, 0, 8, 0)
+        };
+        Button make = null!;
+        make = C.Button("Create", () => _ = MakeFolder(), icon: "plus");
+        Button paste = C.AsyncButton("Paste", async () =>
+        {
+            string text = (TopLevel.GetTopLevel(app.Root)?.Clipboard is { } clipboard ? await clipboard.TryGetTextAsync() : null)?.Trim() ?? "";
+            if (text.Length == 0)
+                status.Text = "Nothing to paste.";
+            else
+                newName.Text = text;
+        });
+        paste.Margin = new(0, 0, 8, 0);
+        DockPanel.SetDock(make, Dock.Right);
+        DockPanel.SetDock(paste, Dock.Right);
+        newRow = C.Space(new DockPanel { LastChildFill = true, Children = { make, paste, newName } }, 14);
+        newRow.IsVisible = false;
+        newName.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) _ = MakeFolder(); };
+        async Task MakeFolder()
+        {
+            string[] parts = (newName.Text ?? "").Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            try
+            {
+                if (parts.Length == 0)
+                    throw new InvalidDataException();
+                foreach (string part in parts)
+                {
+                    FileCatalog.ValidateSegment(part);
+                    if (part.IndexOfAny([':', '*', '?', '"', '<', '>', '|']) >= 0)
+                        throw new InvalidDataException(part);
+                }
+            }
+            catch (InvalidDataException) { status.Text = "Type a folder name without : * ? \" < > |, up to 180 characters."; return; }
+            string path = folder + "/" + string.Join("/", parts);
+            make.IsEnabled = false;
+            status.Text = "Creating " + string.Join(" › ", parts) + " on " + peer.Name + "… It asks there first unless it trusts this device.";
+            try
+            {
+                if (await app.Engine.CreateFolderAsync(peer, path))
+                {
+                    newName.Text = "";
+                    await Open(path);
+                    status.Text = "Folder created. Send here, or make another one inside it.";
+                }
+                else
+                    status.Text = peer.Name + " declined making the folder.";
+            }
+            catch (Exception error) { status.Text = TransferEngine.HumanError(error); }
+            finally { make.IsEnabled = true; }
+        }
+        async Task Open(string path)
+        {
+            int mine = ++load;
+            status.Text = "Reading folders…";
+            try
+            {
+                SpaceEntry[] entries = await app.Engine.BrowseFoldersAsync(peer, path);
+                if (mine != load)
+                    return;
+                folder = path;
+                where.Text = path.Length == 0 ? peer.Name : peer.Name + " › " + path.Replace("/", " › ");
+                up.IsEnabled = send.IsEnabled = path.Length > 0;
+                newRow.IsVisible = path.Length > 0;
+                list.Children.Clear();
+                status.Text = path.Length == 0 ? "Choose a folder. Only folder names are shown, never files." : entries.Length == 0 ? "No subfolders here. Send here, make a new folder, or go up." : "Open a subfolder, make a new one, or send here.";
+                foreach (SpaceEntry entry in entries)
+                {
+                    Button row = C.Button(entry.Name, () => _ = Open(entry.Path), icon: "folder");
+                    row.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    row.HorizontalContentAlignment = HorizontalAlignment.Left;
+                    list.Children.Add(row);
+                }
+            }
+            catch (Exception error) { if (mine == load) status.Text = TransferEngine.HumanError(error); }
+        }
+        Button cancel = C.Button("Cancel", () => window.Close(null));
+        window.Content = Body(C.Stack(C.Space(C.Text(Format.Count(items, "item") + " to send", 12, "Muted"), 6), C.Space(where, 6), C.Space(status, 14), newRow, C.Space(new ScrollViewer { Content = list, MaxHeight = 380 }, 16), C.Inline(cancel, up, send)));
+        _ = Open("");
         return await ShowAsync<string?>(window);
     }
     /// <summary>Returns the chosen device keys, an empty array for every paired PC, or null when cancelled.</summary>

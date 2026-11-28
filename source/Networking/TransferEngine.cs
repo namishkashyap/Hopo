@@ -530,6 +530,11 @@ public sealed partial class TransferEngine : IDisposable
                 await ServeSpaceAsync(ssl, client, peer, hello, serverToken);
                 return;
             }
+            if (hello.Kind.StartsWith("folder-", StringComparison.Ordinal))
+            {
+                await ServeFoldersAsync(ssl, peer, hello, serverToken);
+                return;
+            }
             Wire.Require(hello, "send");
             Manifest manifest = hello.Manifest ?? throw new ProtocolException("The transfer manifest is missing.");
             FileCatalog.ValidateManifest(manifest);

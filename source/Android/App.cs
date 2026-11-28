@@ -45,6 +45,7 @@ public sealed class App : Avalonia.Application
         Shell created = new(HopoHost.Store, HopoHost.Identity, false);
         Shell.NotifyHook = (title, text) => AndroidApp.Current?.Notify(title, text);
         Shell.ImportHook = HopoHost.ImportAsync;
+        Shell.FolderImportHook = HopoHost.ImportFolderAsync;
         Shell.IncomingHook = (request, answer) => AndroidApp.Current?.Incoming(request, answer) ?? (() => { });
         // A trusted PC's files arrive without asking, each transfer in its own folder, so it can be moved to Downloads on its own.
         created.Engine.TrustedFolder = (inbox, manifest) => inbox.StartsWith(HopoHost.Inbox, StringComparison.Ordinal) ? Path.Combine(inbox, manifest.Id) : inbox;

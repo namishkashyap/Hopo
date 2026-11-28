@@ -144,6 +144,7 @@ internal static partial class Program
         await BrowserCasesAsync();
         await SharedSpaceCasesAsync();
         await NativeSyncCasesAsync();
+        await SendToFolderCasesAsync();
         await DiscoveryRecoveryCasesAsync();
         await SecurityCasesAsync(a, b);
         using TransferEngine ea = new(sa, a, true), eb = new(sb, b, true);

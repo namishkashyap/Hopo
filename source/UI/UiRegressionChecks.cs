@@ -36,6 +36,11 @@ internal static class UiRegressionChecks
         foreach (string theme in new[] { "Light", "Dark" })
         {
             app.ApplyTheme(theme);
+            app.Navigate("Drop folders");
+            app.Render(Path.Combine(output, theme + "-Drop-folders.png"), theme == "Dark" ? 1000 : 1440, theme == "Dark" ? 720 : 900);
+            if (!Descendants<TextBlock>(app.Window.Content as DependencyObject ?? app.Window).Any(text => text.Text == "Folders on this PC that others can send into") || !Descendants<TextBlock>(app.Window.Content as DependencyObject ?? app.Window).Any(text => text.Text == "NK"))
+                throw new InvalidDataException("Drop folders must show the shared-folder list and the paired devices to send into.");
+            passed++;
             app.Navigate("Shared Spaces");
             app.Render(Path.Combine(output, theme + "-Shared-Spaces-NK.png"), theme == "Dark" ? 1000 : 1440, theme == "Dark" ? 720 : 900);
             ComboBox device = Descendants<ComboBox>(app.Window.Content as DependencyObject ?? app.Window).Single(control => control.SelectedItem is Peer);
@@ -64,7 +69,7 @@ internal static class UiRegressionChecks
             throw new InvalidDataException("The window must use the new brand.");
         app.ShowMenu(true);
         app.Render(Path.Combine(output, "Menu.png"), 1440, 960);
-        if (app.Find<Grid>("MenuLayer").Visibility != Visibility.Visible || app.Find<StackPanel>("Navigation").Children.OfType<Button>().Count() != 11 || app.Find<StackPanel>("Navigation").Children.OfType<Button>().Count(button => System.Windows.Automation.AutomationProperties.GetName(button) is "Home" or "Past connections") != 2)
+        if (app.Find<Grid>("MenuLayer").Visibility != Visibility.Visible || app.Find<StackPanel>("Navigation").Children.OfType<Button>().Count() != 12 || app.Find<StackPanel>("Navigation").Children.OfType<Button>().Count(button => System.Windows.Automation.AutomationProperties.GetName(button) is "Home" or "Past connections") != 2)
             throw new InvalidDataException("The menu must open with Home, the Share and Manage pages and Past connections.");
         app.Find<StackPanel>("Navigation").Children.OfType<Button>().First(button => System.Windows.Automation.AutomationProperties.GetName(button) == "Devices").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         if (app.CurrentPage != "Devices" || app.Find<Grid>("MenuLayer").Visibility != Visibility.Collapsed)
@@ -115,7 +120,7 @@ internal static class UiRegressionChecks
         string[] userPages = app.Find<StackPanel>("Navigation").Children.OfType<Button>().Where(button => button.Visibility == Visibility.Visible).Select(button => System.Windows.Automation.AutomationProperties.GetName(button)).ToArray();
         app.Navigate("Settings");
         app.Render(Path.Combine(output, "User-Home.png"), 1440, 960);
-        if (!userPages.SequenceEqual(["Home", "Send files", "Share text or a link", "Transfers"]) || app.CurrentPage != "Home" || Descendants<Button>((DependencyObject)app.Find<ContentControl>("PageContent").Content).Any(item => System.Windows.Automation.AutomationProperties.GetName(item) == "Folder"))
+        if (!userPages.SequenceEqual(["Home", "Send files", "Drop folders", "Share text or a link", "Transfers"]) || app.CurrentPage != "Home" || Descendants<Button>((DependencyObject)app.Find<ContentControl>("PageContent").Content).Any(item => System.Windows.Automation.AutomationProperties.GetName(item) == "Folder"))
             throw new InvalidDataException("User mode must hide the admin pages and the Folder dock button: " + string.Join(", ", userPages));
         app.SetMode(true, false);
         passed++;

@@ -68,7 +68,48 @@ internal static class HopoHost
         Directory.CreateDirectory(folder);
         return folder;
     }
-    /// <summary>Copies a document chosen in Android's file picker into the app's cache, so the shared code can read it as a file.</summary>
+    /// <summary>Copies a folder chosen in Android's folder picker, with its subfolders, into the app's cache so it is sent as one folder. Files that can't be read are left out and counted.</summary>
+    public static async Task<string?> ImportFolderAsync(IStorageFolder folder, Action<string> progress)
+    {
+        string root = Path.Combine(NewBatch(), SafeName(folder.Name));
+        int copied = 0, failed = 0;
+        async Task CopyAsync(IStorageFolder source, string target, int depth)
+        {
+            Directory.CreateDirectory(target);
+            if (depth > 32)
+                return;
+            await foreach (IStorageItem item in source.GetItemsAsync())
+            {
+                if (item is IStorageFolder child)
+                    await CopyAsync(child, Path.Combine(target, SafeName(child.Name)), depth + 1);
+                else if (item is IStorageFile file)
+                {
+                    string path = Path.Combine(target, SafeName(file.Name));
+                    bool created = false;
+                    try
+                    {
+                        progress($"Preparing {folder.Name}: file {copied + failed + 1}, {file.Name}…");
+                        await using Stream input = await file.OpenReadAsync();
+                        await Task.Run(async () =>
+                        {
+                            await using FileStream output = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                            created = true;
+                            await input.CopyToAsync(output, 1 << 20);
+                        });
+                        copied++;
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException or Java.Lang.Exception) { failed++; if (created) try { File.Delete(path); } catch (IOException) { } }
+                }
+            }
+        }
+        try
+        {
+            await CopyAsync(folder, root, 0);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or Java.Lang.Exception) { return null; }
+        progress(failed > 0 ? $"{failed} of {copied + failed} files in {folder.Name} could not be read and were left out." : $"{folder.Name} is ready to send ({copied} files).");
+        return root;
+    }
     public static async Task<string?> ImportAsync(IStorageFile file)
     {
         try

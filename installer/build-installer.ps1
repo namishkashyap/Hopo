@@ -28,7 +28,7 @@ foreach ($lantossPayload in @('LantossExplorer.dll','hopoUsers.Explorer.msix','h
 }
 Copy-Item -LiteralPath (Join-Path $lantossRelease 'source\Explorer\RegisterPackage.ps1') -Destination (Join-Path $lantossRelease 'app\RegisterPackage.ps1') -Force
 foreach ($lantossExe in @('hopoUsers.exe','hopoAdmin.exe')) {
-    if ((Get-Item (Join-Path $lantossRelease ('app\'+$lantossExe))).VersionInfo.FileVersion -ne '2.6.9.0') { throw ('Publish '+$lantossExe+' 2.6.9 first.') }
+    if ((Get-Item (Join-Path $lantossRelease ('app\'+$lantossExe))).VersionInfo.FileVersion -ne '2.7.2.0') { throw ('Publish '+$lantossExe+' 2.7.0 first.') }
 }
 
 # Build-only tools are pinned and hash checked. No compiler or installer is installed on the host.
@@ -53,7 +53,7 @@ $lantossWix = Join-Path $lantossTools 'wix\tools\net6.0\any\wix.dll'
 $lantossUI = Join-Path $lantossTools 'wixtoolset.ui.wixext\wixext4\WixToolset.UI.wixext.dll'
 # One setup per app, so each person installs only hopo Users or hopo Admin.
 foreach ($lantossApp in @('Users','Admin')) {
-    $lantossMsi = Join-Path $lantossRelease ('hopo-'+$lantossApp+'-Setup-2.6.9-x64.msi')
+    $lantossMsi = Join-Path $lantossRelease ('hopo-'+$lantossApp+'-Setup-2.7.2-x64.msi')
     & $DotnetPath $lantossWix build (Join-Path $PSScriptRoot 'Lantoss.wxs') -arch x64 -ext $lantossUI -d ('ReleaseDir='+$lantossRelease) -d ('App='+$lantossApp) -out $lantossMsi -intermediatefolder (Join-Path $lantossBuild ('installer-objects-'+$lantossApp)) -pdbtype none -wx
     if ($LASTEXITCODE) { throw 'MSI compilation or validation failed.' }
     Get-FileHash -LiteralPath $lantossMsi -Algorithm SHA256

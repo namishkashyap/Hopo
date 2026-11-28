@@ -10,7 +10,7 @@ Older records: [VERIFICATION.md](../VERIFICATION.md) covers Lantoss 1.9 and earl
 
 | Method | What it checks | How |
 |---|---|---|
-| **Automated checks** | Pairing, encryption, transfers, file-name safety, sync, history, settings, the phone page | 319 checks in a custom test runner (`.\source\build.ps1 -Mode Test`), plus a browser-page test (`node .\source\tests\browser-ui.test.cjs`). They run on every change. |
+| **Automated checks** | Pairing, encryption, transfers, file-name safety, sync, history, settings, the phone page | 338 checks in a custom test runner (`.\source\build.ps1 -Mode Test`), plus a browser-page test (`node .\source\tests\browser-ui.test.cjs`). They run on every change. |
 | **Screen checks** | Every Windows page in Light and Dark, the Home panels, the Ctrl+Shift+S ring | The app draws each page to an image (`hopoUsers.exe --ui-regression`). Each image is checked for the right content, then looked at. |
 | **Break test** | Problem files, cancels, network drops, junk connections, speed, CPU | Two extra hopo engines on one PC send to each other. They are kept off the network, so no real device sees them. |
 | **Freeze probe** | Whether the window stops responding during transfers | hopo's real window runs off screen while files arrive. Every 15 ms a background thread times how long the window takes to answer, the same way Windows decides an app is "Not responding". |
@@ -20,6 +20,82 @@ Older records: [VERIFICATION.md](../VERIFICATION.md) covers Lantoss 1.9 and earl
 Speeds below were measured on a home network: the phone on 2.4 GHz Wi-Fi (286 Mbps link), the PC on Wi-Fi 6. A 5 GHz network is usually several times faster.
 
 ---
+
+## 2.7.2: Keyboard, Paste and folders from the phone
+
+**Reported:** on the phone the text box hid behind the keyboard. Asked for: a Paste button, and a way to make folders on a PC from the phone or another PC.
+
+**Found:** the phone app did nothing when the keyboard opened, so the bottom of the screen stayed under it.
+
+**Fixed and added:**
+- **Keyboard (phone):** the screen lifts by the keyboard's height and scrolls the box into view. The Home dock steps aside while typing. After a lock or rotation it follows the new window.
+- **Paste:** next to the Home Text panel, the Text & links box (phone, Mac/Linux, Windows) and the new folder name.
+- **Create folder:** the folder browser makes a folder on the PC right away, including folders inside folders (Projects/2026). Always accept devices go straight in; others are asked first.
+- **Whole folders from the phone:** Folder on the Drop folders page and the Send panel opens Android's folder picker. hopo copies the folder with its subfolders and sends it as one item.
+
+**Tested:**
+- 338 automated checks, 4 new:
+  - Create folder asks and Decline makes nothing;
+  - Accept makes nested folders;
+  - an existing folder is not copied;
+  - names and paths are checked.
+- The Windows folder browser real-window test (12 of 12, now with Create folder) and the Windows screen checks.
+- **On the phone (Pixel 7a) against a test PC with sample folders:**
+  - the keyboard lifted the Text panel, the Text & links page and the folder browser;
+  - Paste filled both text boxes;
+  - Create made Pictures/Phone/2026 on the test PC;
+  - a phone folder with a subfolder arrived complete, with both files checked.
+- **Not tested:** the keyboard right after the phone is unlocked, which needs the phone's PIN.
+
+## 2.7.1: Drop folders page
+
+**Reported:** the Drop folders setting couldn't be found.
+
+**Found:** on Windows, Settings is only in the Admin app, so the Users app never showed it. On the phone the setting was hidden, because a phone only sends.
+
+**Fixed:** Drop folders is now its own page in the Share menu, in both Windows apps, on the phone and on Mac/Linux.
+- **On a PC:** the page lists this PC's drop folders, with Add drop folder and Remove.
+- **On every device:** the page lists paired devices, each with *Choose files*, to send into a folder on that device.
+- The setting was removed from Settings.
+
+**Tested:**
+- The 334 automated checks.
+- The Windows screen checks, which now draw the new page and check the menu in both apps.
+- The phone/Mac/Linux pages drawn to images.
+- The Windows folder browser real-window test (12 of 12).
+- Both MSIs pass verify-installer. The APK reports version 2.7.1 (code 9).
+- **Not yet tested on the phone:** it was not connected.
+
+## 2.7.0: Send to a folder
+
+**New:** the PC owner adds *drop folders* in Settings. From a phone or another PC, open one of them (or a folder inside it), or make a new folder there, and send straight into it. Only folder names are shown, never files. Devices set to *Always accept* skip the prompt; others are asked.
+
+**Tested:**
+- 15 automated checks:
+  - nothing is shared until a drop folder is added, and a missing folder can't be added;
+  - only the drop folders are listed, once each; a deleted one is left out and doesn't block saving settings;
+  - two drop folders with the same name are told apart;
+  - no file names and no hidden folders are shown;
+  - paths can't leave the drop folders;
+  - Decline writes nothing, and Accept lands in exactly the chosen folder;
+  - a trusted device skips the prompt;
+  - same-name files are kept as copies;
+  - a new folder is made only on Accept, one level deep, with a valid name;
+  - removing a drop folder stops sends into it at once;
+  - an unpaired device is refused.
+- A real-window test of the Windows folder browser against a test PC with sample folders (12 of 12 checks): the "no folders shared" message, browsing, Up, New folder (not made before sending), Send here, and the file arriving in the new folder.
+- The Windows screen checks, and the Settings drop folder list drawn to an image.
+- **Not yet tested on the phone:** the phone was not connected.
+
+## 2.7.0: Android multi-file selection
+
+**Reported:** several files could not be sent from the phone; after choosing several, they weren't shown and couldn't be removed.
+
+**Found:** the phone's file picker already returned several files. The Home Send panel showed only one shortened line and had no remove button.
+
+**Fixed:** every chosen file is listed with its size and a remove button, plus Clear.
+
+**Tested on the phone:** chose 3 files, removed one, and sent 2 to a PC (both verified).
 
 ## 2.6.9: Ctrl+Shift+S ring (Windows)
 

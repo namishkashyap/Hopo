@@ -199,6 +199,7 @@ internal sealed class SettingsPage : IPage
                 AutoConfigureFirewall = firewall.IsChecked == true,
                 CloseToTray = tray.IsChecked == true,
                 SenderFolders = senderFolders.IsChecked == true,
+                DropFolders = app.Store.Preferences.DropFolders,
                 LocalName = address.Text,
                 SendShortcut = shortcut.SelectedItem as string ?? SendShortcut.Default
             });
