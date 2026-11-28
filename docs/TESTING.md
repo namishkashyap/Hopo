@@ -21,6 +21,29 @@ Speeds below were measured on a home network: the phone on 2.4 GHz Wi-Fi (286 Mb
 
 ---
 
+## 2.7.4: Trusted devices send into drop folders without asking
+
+**Reported:** every send into a drop folder asked for approval on the PC, with no way to stop it.
+
+**Found:** trusted devices already skipped the prompt, but the Windows incoming window had no Always accept button, and the only switch was "Trust" on Devices.
+
+**Fixed and added:**
+- **Always accept from <device>** in the Windows incoming window (and for drop and shared folders on Mac/Linux): it saves these files and trusts the device, so its next sends go straight in.
+- **Who can send without asking** on the Drop folders page (Windows, Mac/Linux): each paired device with Always accept or Ask every time.
+- Devices page on Windows: the button reads Always accept files / Ask every time.
+
+**Tested:**
+- 338 automated checks pass; screen checks pass, including the new card.
+- Windows harness with the real app receiving into a drop folder, 9 of 9: the window shows Always accept; it saves the files and trusts the device; the next send arrives with no window; the page lists the device; Ask every time brings the window back; Decline saves nothing.
+- The harness caught a wrong name on the button ("Sender phone → Drop"); it now shows the device name.
+- Both MSIs pass verify-installer; Mac and Linux packages pass their checks; APK 2.7.4 (version code 12) installed on the Pixel 7a.
+
+## 2.7.3: Phone menu fits the screen
+
+**Reported:** on the phone the menu's scrollbar covered the close button and the device card.
+
+**Fixed:** the menu's height left out the status and navigation bars, so it was always too tall. It now fits between them, and the scrollbar is hidden on the phone.
+
 ## 2.7.2: Keyboard, Paste and folders from the phone
 
 **Reported:** on the phone the text box hid behind the keyboard. Asked for: a Paste button, and a way to make folders on a PC from the phone or another PC.

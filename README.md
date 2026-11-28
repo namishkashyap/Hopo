@@ -4,7 +4,7 @@
 
 hopo (formerly Lantoss) is a free, open-source app for Windows, macOS, Linux and Android. Files go straight from one device to another on your own network, encrypted, and nothing is uploaded anywhere.
 
-**Latest version: 2.6.8.** All downloads are on the **[Releases page](https://github.com/namishkashyap/Lantoss/releases/latest)**.
+**Latest version: 2.7.4.** All downloads are on the **[Releases page](https://github.com/namishkashyap/Hopo/releases/latest)**.
 
 ---
 
@@ -24,18 +24,18 @@ hopo (formerly Lantoss) is a free, open-source app for Windows, macOS, Linux and
 
 ## Download
 
-Pick the file for your device. Each link downloads the file directly from the [2.6.8 release](https://github.com/namishkashyap/Lantoss/releases/tag/v2.6.8).
+Pick the file for your device. Each link downloads the file directly from the [2.7.4 release](https://github.com/namishkashyap/Hopo/releases/tag/v2.7.4).
 
 | Device | File to download | Size |
 |---|---|---|
-| **Windows 10 / 11** (most people) | [hopo-Users-Setup-2.6.8-x64.msi](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-Users-Setup-2.6.8-x64.msi) | 75 MB |
-| **Windows 10 / 11** (the person who manages devices and settings) | [hopo-Admin-Setup-2.6.8-x64.msi](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-Admin-Setup-2.6.8-x64.msi) | 75 MB |
-| **Mac with Apple Silicon** (M1, M2, M3, M4) | [hopo-2.6.8-macOS-AppleSilicon.zip](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-macOS-AppleSilicon.zip) | 57 MB |
-| **Mac with an Intel processor** | [hopo-2.6.8-macOS-Intel.zip](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-macOS-Intel.zip) | 60 MB |
-| **Android phone or tablet** (Android 10 or later) | [hopo-2.6.8-android.apk](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-android.apk) | 101 MB |
-| **Linux** (Ubuntu, Debian, Mint, Pop!_OS; 64-bit PC) | [hopo_2.6.8_amd64.deb](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo_2.6.8_amd64.deb) | 60 MB |
-| **Linux on ARM** (Raspberry Pi OS 64-bit and similar) | [hopo_2.6.8_arm64.deb](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo_2.6.8_arm64.deb) | 57 MB |
-| **Any other Linux** (Fedora, Arch, openSUSE…) | [x64 .tar.gz](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-linux-x64.tar.gz) · [arm64 .tar.gz](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-linux-arm64.tar.gz) | 57–60 MB |
+| **Windows 10 / 11** (most people) | [hopo-Users-Setup-2.7.4-x64.msi](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-Users-Setup-2.7.4-x64.msi) | 75 MB |
+| **Windows 10 / 11** (the person who manages devices and settings) | [hopo-Admin-Setup-2.7.4-x64.msi](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-Admin-Setup-2.7.4-x64.msi) | 75 MB |
+| **Mac with Apple Silicon** (M1, M2, M3, M4) | [hopo-2.7.4-macOS-AppleSilicon.zip](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-macOS-AppleSilicon.zip) | 57 MB |
+| **Mac with an Intel processor** | [hopo-2.7.4-macOS-Intel.zip](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-macOS-Intel.zip) | 60 MB |
+| **Android phone or tablet** (Android 10 or later) | [hopo-2.7.4-android.apk](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-android.apk) | 101 MB |
+| **Linux** (Ubuntu, Debian, Mint, Pop!_OS; 64-bit PC) | [hopo_2.7.4_amd64.deb](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo_2.7.4_amd64.deb) | 60 MB |
+| **Linux on ARM** (Raspberry Pi OS 64-bit and similar) | [hopo_2.7.4_arm64.deb](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo_2.7.4_arm64.deb) | 57 MB |
+| **Any other Linux** (Fedora, Arch, openSUSE…) | [x64 .tar.gz](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-linux-x64.tar.gz) · [arm64 .tar.gz](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-linux-arm64.tar.gz) | 57–60 MB |
 | **iPhone, iPad or any phone without the app** | Nothing to download: see [Phones without the app](#phones-without-the-app) | — |
 
 Install hopo on every device you want to share between, and keep them on the **same Wi-Fi or home network**.
@@ -52,10 +52,10 @@ hopo for Windows comes as two apps. Most people need **hopo Users**.
 
 | App | File | What it has |
 |---|---|---|
-| **hopo Users** | `hopo-Users-Setup-2.6.8-x64.msi` | Home, Send files, Text & links and Transfers. For everyone who just shares files. |
-| **hopo Admin** | `hopo-Admin-Setup-2.6.8-x64.msi` | Everything in hopo Users, plus Devices, shared folders, Sync, History and Settings. For the person who manages the devices. |
+| **hopo Users** | `hopo-Users-Setup-2.7.4-x64.msi` | Home, Send files, Text & links and Transfers. For everyone who just shares files. |
+| **hopo Admin** | `hopo-Admin-Setup-2.7.4-x64.msi` | Everything in hopo Users, plus Devices, shared folders, Sync, History and Settings. For the person who manages the devices. |
 
-Prefer not to install? [hopoUsers.exe](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopoUsers.exe) and [hopoAdmin.exe](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopoAdmin.exe) run on their own without setup.
+Prefer not to install? [hopoUsers.exe](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopoUsers.exe) and [hopoAdmin.exe](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopoAdmin.exe) run on their own without setup.
 
 ### How to install
 
@@ -87,8 +87,8 @@ Requires **macOS 14 Sonoma or later**.
 ### Which file do I need?
 
 Click the **Apple menu** (top-left corner) → **About This Mac**:
-- **Chip: Apple M1, M2, M3 or M4** → download [hopo-2.6.8-macOS-AppleSilicon.zip](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-macOS-AppleSilicon.zip)
-- **Processor: Intel** → download [hopo-2.6.8-macOS-Intel.zip](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-macOS-Intel.zip)
+- **Chip: Apple M1, M2, M3 or M4** → download [hopo-2.7.4-macOS-AppleSilicon.zip](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-macOS-AppleSilicon.zip)
+- **Processor: Intel** → download [hopo-2.7.4-macOS-Intel.zip](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-macOS-Intel.zip)
 
 ### How to install
 
@@ -116,9 +116,9 @@ Requires **Android 10 or later**. The app isn't on the Play Store yet, so you in
 
 ### How to install
 
-1. On your phone, open this page in **Chrome** and tap [hopo-2.6.8-android.apk](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-android.apk). Chrome downloads the file (about 101 MB).
+1. On your phone, open this page in **Chrome** and tap [hopo-2.7.4-android.apk](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-android.apk). Chrome downloads the file (about 101 MB).
    - If Chrome warns that "this type of file can harm your device", tap **Download anyway**.
-2. When the download finishes, tap **Open** (or open **Files → Downloads** and tap `hopo-2.6.8-android.apk`).
+2. When the download finishes, tap **Open** (or open **Files → Downloads** and tap `hopo-2.7.4-android.apk`).
 3. If Android says **"For your security, your phone is not allowed to install unknown apps from this source"**, tap **Settings**, turn on **Allow from this source**, and go back.
 4. Tap **Install**.
    - If **Google Play Protect** shows a warning, tap **More details → Install anyway**. hopo is open source, and the warning appears for any app that isn't from the Play Store.
@@ -144,23 +144,23 @@ hopo needs a desktop session (X11, or Wayland with XWayland).
 
 ### Ubuntu, Debian, Linux Mint, Pop!_OS (.deb)
 
-Download [hopo_2.6.8_amd64.deb](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo_2.6.8_amd64.deb) (or [hopo_2.6.8_arm64.deb](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo_2.6.8_arm64.deb) for ARM), then in a terminal:
+Download [hopo_2.7.4_amd64.deb](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo_2.7.4_amd64.deb) (or [hopo_2.7.4_arm64.deb](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo_2.7.4_arm64.deb) for ARM), then in a terminal:
 
 ```sh
 cd ~/Downloads
-sudo apt install ./hopo_2.6.8_amd64.deb      # or ./hopo_2.6.8_arm64.deb
+sudo apt install ./hopo_2.7.4_amd64.deb      # or ./hopo_2.7.4_arm64.deb
 ```
 
 Start **hopo** from your applications menu, or run `hopo`. Uninstall with `sudo apt remove hopo`.
 
 ### Any other distribution (.tar.gz)
 
-Download [hopo-2.6.8-linux-x64.tar.gz](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-linux-x64.tar.gz) (or the [arm64 version](https://github.com/namishkashyap/Lantoss/releases/download/v2.6.8/hopo-2.6.8-linux-arm64.tar.gz)), then:
+Download [hopo-2.7.4-linux-x64.tar.gz](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-linux-x64.tar.gz) (or the [arm64 version](https://github.com/namishkashyap/Hopo/releases/download/v2.7.4/hopo-2.7.4-linux-arm64.tar.gz)), then:
 
 ```sh
 cd ~/Downloads
-tar -xzf hopo-2.6.8-linux-x64.tar.gz
-cd hopo-2.6.8
+tar -xzf hopo-2.7.4-linux-x64.tar.gz
+cd hopo-2.7.4
 ./install.sh            # for your user; or: sudo ./install.sh for everyone
 ```
 
@@ -213,7 +213,7 @@ Every version is tested before release: automated checks, screen checks, a break
 - **Does it need the internet?** No. Your devices only need to be on the same network.
 - **Is it safe?** Every connection is encrypted and pinned to the device you paired with, and nothing is sent until the receiver accepts (unless they chose **Always accept** for that device). The code is open for anyone to read.
 - **Why does my computer or phone warn me when installing?** The builds aren't signed with a paid Microsoft, Apple or Google certificate, so each system asks you to confirm once. The steps above show what to click.
-- **Older versions?** Every version is on the [Releases page](https://github.com/namishkashyap/Lantoss/releases). All versions from 2.0.2 on can pair with each other.
+- **Older versions?** Every version is on the [Releases page](https://github.com/namishkashyap/Hopo/releases). All versions from 2.0.2 on can pair with each other.
 
 ---
 
