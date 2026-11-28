@@ -50,10 +50,24 @@ public sealed partial class TransferEngine
         FileCatalog.ValidateRelative(folder);
         return UploadBatchAsync(peer, "folder-upload", "", folder, paths, token);
     }
+    /// <summary>Makes a folder, and any missing folders above it, inside a drop folder on another PC right away. The other PC asks first unless it trusts this device. False when it declines.</summary>
+    public async Task<bool> CreateFolderAsync(Peer peer, string folder, CancellationToken token = default)
+    {
+        FileCatalog.ValidateRelative(folder);
+        WireMessage result = await SpaceRequestAsync(peer, new()
+        {
+            Kind = "folder-create",
+            RelativePath = folder
+        }, token);
+        if (result.Kind == "declined")
+            return false;
+        Wire.Require(result, "accepted");
+        return true;
+    }
     private async Task ServeFoldersAsync(Stream stream, Peer peer, WireMessage hello, CancellationToken token)
     {
         string relative = hello.RelativePath;
-        // An upload may name a new folder as its last part; the folder above it must already exist.
+        // An upload or a new folder may end in folders that don't exist yet; the closest folder above them that exists must be inside the drop folder.
         string Folder(bool upload)
         {
             (string Name, string Path)[] roots = DropRoots(store.Preferences.DropFolders);
@@ -69,7 +83,10 @@ public sealed partial class TransferEngine
             (string Name, string Path) root = roots.FirstOrDefault(item => item.Name == top);
             if (root.Path is null)
                 throw new ProtocolException("This folder is no longer shared.");
-            string folder = slash < 0 ? root.Path : FileCatalog.Within(root.Path, relative[(slash + 1)..]), existing = upload && slash >= 0 && !Directory.Exists(folder) ? Path.GetDirectoryName(folder)! : folder;
+            string folder = slash < 0 ? root.Path : FileCatalog.Within(root.Path, relative[(slash + 1)..]), existing = folder;
+            if (upload && slash >= 0)
+                while (!Directory.Exists(existing) && existing.Length > root.Path.Length)
+                    existing = Path.GetDirectoryName(existing)!;
             try
             {
                 FileCatalog.CheckSafePath(folder);
@@ -79,7 +96,7 @@ public sealed partial class TransferEngine
                 throw new ProtocolException("This folder is no longer available.");
             return folder;
         }
-        string target = Folder(hello.Kind == "folder-upload");
+        string target = Folder(hello.Kind is "folder-upload" or "folder-create");
         if (hello.Kind == "folder-browse")
         {
             List<SpaceEntry> entries = [];
@@ -117,6 +134,31 @@ public sealed partial class TransferEngine
         }
         if (target.Length == 0)
             throw new ProtocolException("Open one of the shared folders first, then send.");
+        if (hello.Kind == "folder-create")
+        {
+            bool made = Directory.Exists(target);
+            if (!made)
+            {
+                string parent = target;
+                while (!Directory.Exists(parent))
+                    parent = Path.GetDirectoryName(parent)!;
+                Manifest shown = new()
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Entries = [new() { RelativePath = Path.GetRelativePath(parent, target).Replace('\\', '/'), Directory = true }]
+                };
+                using CancellationTokenSource approval = CancellationTokenSource.CreateLinkedTokenSource(token);
+                approval.CancelAfter(TimeSpan.FromMinutes(2));
+                made = store.Trusted(peer.Fingerprint)?.Trusted == true || ApproveReceive != null && (await ApproveReceive(new(peer.Name + " → " + relative, peer.Fingerprint, shown, parent, FileCatalog.FreeSpace(parent), peer.KeyVerified, false, true), approval.Token)).Accepted;
+                if (made)
+                    Guard();
+            }
+            await Wire.WriteAsync(stream, new()
+            {
+                Kind = made ? "accepted" : "declined"
+            }, token);
+            return;
+        }
         Wire.Require(hello, "folder-upload");
         void Guard()
         {

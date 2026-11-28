@@ -70,7 +70,16 @@ internal static partial class Program
         host.ApproveReceive = (request, _) => { approvals++; return Task.FromResult(new ReceiveDecision(true, request.DefaultFolder)); };
         await client.SendToFolderAsync(hostPeer, "Documents/Work/Recordings 27 Nov", [source]);
         Check(approvals == 4 && File.ReadAllText(Path.Combine(fresh, "Recording.mp4")) == "recording bytes" && (await client.BrowseFoldersAsync(hostPeer, "Documents/Work")).Any(entry => entry.Name == "Recordings 27 Nov"), "A new folder inside a drop folder is made on Accept and holds the files");
-        Check((await Fails(() => client.SendToFolderAsync(hostPeer, "Documents/New/Deeper", [source]))).Length > 0 && !Directory.Exists(Path.Combine(documents, "New")) && (await Fails(() => client.SendToFolderAsync(hostPeer, "Documents/CON", [source]))).Length > 0 && (await Fails(() => client.SendToFolderAsync(hostPeer, "Documents", [source]))).Length == 0 && (await Fails(() => client.SendToFolderAsync(hostPeer, "New top", [source]))).Length > 0, "A new folder is one level deep inside a drop folder and must have a valid name");
+        string? shownFolder = null, shownEntry = null;
+        host.ApproveReceive = (request, _) => { approvals++; shownFolder = request.DefaultFolder; shownEntry = request.Manifest.Entries.Single().RelativePath; return Task.FromResult(new ReceiveDecision(false, request.DefaultFolder)); };
+        bool declined = await client.CreateFolderAsync(hostPeer, "Documents/Projects/2026/November");
+        Check(!declined && approvals == 5 && shownFolder == documents && shownEntry == "Projects/2026/November" && !Directory.Exists(Path.Combine(documents, "Projects")), "Create folder asks a device that isn't trusted, showing the folders to be made; Decline makes nothing");
+        host.ApproveReceive = (request, _) => { approvals++; return Task.FromResult(new ReceiveDecision(true, request.DefaultFolder)); };
+        Check(await client.CreateFolderAsync(hostPeer, "Documents/Projects/2026/November") && approvals == 6 && Directory.Exists(Path.Combine(documents, "Projects", "2026", "November")) && (await client.BrowseFoldersAsync(hostPeer, "Documents/Projects/2026")).Single().Name == "November", "Create folder makes folders inside folders right away on Accept, without sending files");
+        Check(await client.CreateFolderAsync(hostPeer, "Documents/Projects") && approvals == 6 && Directory.GetDirectories(documents, "Projects*").Length == 1, "Creating a folder that already exists succeeds without asking and makes no copy");
+        await client.SendToFolderAsync(hostPeer, "Documents/Clips/Monday", [source]);
+        Check(approvals == 7 && File.Exists(Path.Combine(documents, "Clips", "Monday", "Recording.mp4")), "Files can be sent into new folders inside new folders");
+        Check((await Fails(() => client.CreateFolderAsync(hostPeer, "Documents/CON"))).Length > 0 && (await Fails(() => client.CreateFolderAsync(hostPeer, "New top"))).Length > 0 && (await Fails(() => client.CreateFolderAsync(hostPeer, "Documents/../Outside/x"))).Length > 0 && (await Fails(() => client.SendToFolderAsync(hostPeer, "Documents/CON", [source]))).Length > 0 && !Directory.Exists(Path.Combine(outside, "x")), "New folders must have valid names and stay inside a drop folder");
         approvals = 4;
         Peer clientPeer = hostStore.Peers.Single(p => p.Fingerprint == clientKey.Fingerprint);
         host.EditPeer(clientPeer with
