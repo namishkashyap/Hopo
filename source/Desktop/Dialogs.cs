@@ -394,8 +394,8 @@ internal sealed class Dialogs(Shell app)
                 });
                 choose.IsEnabled = !request.FixedFolder;
                 // A paired PC can be trusted here: its next transfers arrive without asking.
-                Button always = C.Button("Always accept from " + request.PeerName, () => { Trust(request); window.Close(true); }, icon: "check");
-                always.IsVisible = !request.Browser && !request.FixedFolder && request.Fingerprint.Length > 0 && app.Store.Trusted(request.Fingerprint) != null;
+                Button always = C.Button("Always accept from " + (app.Store.Trusted(request.Fingerprint)?.Name ?? request.PeerName), () => { Trust(request); window.Close(true); }, icon: "check");
+                always.IsVisible = !request.Browser && request.Fingerprint.Length > 0 && app.Store.Trusted(request.Fingerprint) != null;
                 choose.IsVisible = !OperatingSystem.IsAndroid();
                 StackPanel names = C.Stack();
                 foreach (ManifestEntry entry in request.Manifest.Entries.Take(8))
