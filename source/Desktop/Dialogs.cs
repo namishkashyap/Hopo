@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -86,32 +87,57 @@ internal sealed class Dialogs(Shell app)
         up.IsEnabled = send.IsEnabled = false;
         TextBox newName = new()
         {
-            PlaceholderText = "New folder name",
-            MinWidth = 180,
+            PlaceholderText = "New folder name, e.g. Projects/2026",
+            MinWidth = 140,
             Margin = new(0, 0, 8, 0)
         };
-        Button make = C.Button("New folder", () => MakeFolder(), icon: "folder");
-        DockPanel.SetDock(make, Dock.Right);
-        newRow = C.Space(new DockPanel { LastChildFill = true, Children = { make, newName } }, 14);
-        newRow.IsVisible = false;
-        newName.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) MakeFolder(); };
-        void MakeFolder()
+        Button make = null!;
+        make = C.Button("Create", () => _ = MakeFolder(), icon: "plus");
+        Button paste = C.AsyncButton("Paste", async () =>
         {
-            string name = (newName.Text ?? "").Trim();
+            string text = (TopLevel.GetTopLevel(app.Root)?.Clipboard is { } clipboard ? await clipboard.TryGetTextAsync() : null)?.Trim() ?? "";
+            if (text.Length == 0)
+                status.Text = "Nothing to paste.";
+            else
+                newName.Text = text;
+        });
+        paste.Margin = new(0, 0, 8, 0);
+        DockPanel.SetDock(make, Dock.Right);
+        DockPanel.SetDock(paste, Dock.Right);
+        newRow = C.Space(new DockPanel { LastChildFill = true, Children = { make, paste, newName } }, 14);
+        newRow.IsVisible = false;
+        newName.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) _ = MakeFolder(); };
+        async Task MakeFolder()
+        {
+            string[] parts = (newName.Text ?? "").Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             try
             {
-                FileCatalog.ValidateSegment(name);
-                if (name.IndexOfAny(['\\', ':', '*', '?', '"', '<', '>', '|']) >= 0)
-                    throw new InvalidDataException(name);
+                if (parts.Length == 0)
+                    throw new InvalidDataException();
+                foreach (string part in parts)
+                {
+                    FileCatalog.ValidateSegment(part);
+                    if (part.IndexOfAny([':', '*', '?', '"', '<', '>', '|']) >= 0)
+                        throw new InvalidDataException(part);
+                }
             }
-            catch (InvalidDataException) { status.Text = "Type a folder name without \\ / : * ? \" < > |, up to 180 characters."; return; }
-            load++;
-            folder = folder + "/" + name;
-            newName.Text = "";
-            where.Text = peer.Name + " › " + folder.Replace("/", " › ");
-            list.Children.Clear();
-            newRow.IsVisible = false;
-            status.Text = "New folder. " + peer.Name + " makes it when the files are accepted.";
+            catch (InvalidDataException) { status.Text = "Type a folder name without : * ? \" < > |, up to 180 characters."; return; }
+            string path = folder + "/" + string.Join("/", parts);
+            make.IsEnabled = false;
+            status.Text = "Creating " + string.Join(" › ", parts) + " on " + peer.Name + "… It asks there first unless it trusts this device.";
+            try
+            {
+                if (await app.Engine.CreateFolderAsync(peer, path))
+                {
+                    newName.Text = "";
+                    await Open(path);
+                    status.Text = "Folder created. Send here, or make another one inside it.";
+                }
+                else
+                    status.Text = peer.Name + " declined making the folder.";
+            }
+            catch (Exception error) { status.Text = TransferEngine.HumanError(error); }
+            finally { make.IsEnabled = true; }
         }
         async Task Open(string path)
         {

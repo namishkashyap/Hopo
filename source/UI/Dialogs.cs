@@ -281,30 +281,45 @@ internal sealed class Dialogs(AppShell app)
         send.Margin = new(10, 0, 0, 0);
         TextBox newName = new()
         {
-            MinWidth = 260,
-            Margin = new(0, 0, 10, 0),
+            MinWidth = 200,
+            Margin = new(0, 0, 8, 0),
             VerticalContentAlignment = VerticalAlignment.Center
         };
         AutomationProperties.SetName(newName, "New folder name");
-        Button make = C.Button("New folder", () => MakeFolder(), icon: "folder");
-        newRow = C.Space(C.Stack(C.Space(C.Text("Or name a new folder to make here:", 12, "Muted"), 5), C.Inline(newName, make)), 14);
+        Button make = null!;
+        make = C.Button("Create folder", () => _ = MakeFolder(), icon: "plus");
+        Button paste = C.Button("Paste", () => { string text = Clipboard.ContainsText() ? Clipboard.GetText().Trim() : ""; if (text.Length == 0) status.Text = "Nothing to paste."; else newName.Text = text; });
+        paste.Margin = new(0, 0, 8, 0);
+        newRow = C.Space(C.Stack(C.Space(C.Text("Make a new folder here. Use / for folders inside folders, for example Projects/2026.", 12, "Muted"), 5), C.Inline(newName, paste, make)), 14);
         newRow.Visibility = Visibility.Collapsed;
-        newName.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) MakeFolder(); };
-        void MakeFolder()
+        newName.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) _ = MakeFolder(); };
+        async Task MakeFolder()
         {
-            string name = newName.Text.Trim();
+            string[] parts = newName.Text.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             try
             {
-                FileCatalog.ValidateSegment(name);
+                if (parts.Length == 0)
+                    throw new InvalidDataException();
+                foreach (string part in parts)
+                    FileCatalog.ValidateSegment(part);
             }
-            catch (InvalidDataException) { status.Text = "Type a folder name without \\ / : * ? \" < > |, up to 180 characters."; return; }
-            load++;
-            folder = folder + "/" + name;
-            newName.Text = "";
-            where.Text = peer.Name + " › " + folder.Replace("/", " › ");
-            list.Children.Clear();
-            newRow.Visibility = Visibility.Collapsed;
-            status.Text = "New folder. " + peer.Name + " makes it when the files are accepted.";
+            catch (InvalidDataException) { status.Text = "Type a folder name without : * ? \" < > |, up to 180 characters."; return; }
+            string path = folder + "/" + string.Join("/", parts);
+            make.IsEnabled = false;
+            status.Text = "Creating " + string.Join(" › ", parts) + " on " + peer.Name + "… It asks there first unless it trusts this PC.";
+            try
+            {
+                if (await app.Engine.CreateFolderAsync(peer, path))
+                {
+                    newName.Text = "";
+                    await Open(path);
+                    status.Text = "Folder created. Send here, or make another one inside it.";
+                }
+                else
+                    status.Text = peer.Name + " declined making the folder.";
+            }
+            catch (Exception error) { status.Text = TransferEngine.HumanError(error); }
+            finally { make.IsEnabled = true; }
         }
         async Task Open(string path)
         {

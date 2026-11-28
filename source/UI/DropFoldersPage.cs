@@ -16,7 +16,7 @@ internal sealed class DropFoldersPage : IPage
         this.app = app;
         Button add = C.Button("Add drop folder", AddFolders, true, "plus");
         StackPanel share = C.Stack(C.Heading("Folders on this PC that others can send into"), C.Space(C.Text("Paired phones and PCs see these folders by name, open the folders inside them, and can make a new folder there. They never see your files. Devices set to Always accept send without asking; others need your approval.", 12, "Muted"), 14), C.Space(dropList, 14), add);
-        StackPanel send = C.Stack(C.Heading("Send into a folder on another device"), C.Space(C.Text("Choose a device, pick the files, then open the folder to put them in. That device must have added drop folders on its own Drop folders page.", 12, "Muted"), 14), devices);
+        StackPanel send = C.Stack(C.Heading("Send into a folder on another device"), C.Space(C.Text("Choose Files or Folder next to a device, then open the folder to put them in, or create a new one there. That device must have added drop folders on its own Drop folders page.", 12, "Muted"), 14), devices);
         View = C.Stack(C.Hero("hopo", "Drop folders", "Send files straight into a folder you choose, from a phone or another PC."), C.Space(C.Columns(C.Card(share), C.Card(send), 420), 20),
             C.Space(C.Note("How to send from your phone", "On the phone, open hopo, open the menu and choose Drop folders. Pick this PC, choose files, open a folder and tap Send here."), 0, 4));
     }
@@ -48,15 +48,17 @@ internal sealed class DropFoldersPage : IPage
             devices.Children.Add(C.Stack(C.Space(C.Text("No paired devices yet. Pair a PC on the Devices page first.", 13, "Muted"), 10), C.Button("Open Devices", () => app.Navigate("Devices"), icon: "devices")));
         foreach (Peer peer in paired)
         {
-            Button choose = C.Small("Choose files…", () => ChooseAndSend(peer));
+            Button choose = C.Small("Files…", () => ChooseAndSend(peer)), chooseFolder = C.Small("Folder…", () => { OpenFolderDialog picker = new() { Title = "Choose folders to send to " + peer.Name, Multiselect = true }; if (picker.ShowDialog(app.Window) == true) app.Dialogs.SendToFolder(peer, picker.FolderNames); });
+            DockPanel.SetDock(chooseFolder, Dock.Right);
             DockPanel.SetDock(choose, Dock.Right);
+            choose.Margin = new(0, 0, 6, 0);
             StackPanel text = C.Stack(C.Text(peer.Name, 14, bold: true), C.Text(peer.Online ? "Online" : "Offline: open hopo on it first", 11, peer.Online ? "Success" : "Muted"));
             text.VerticalAlignment = VerticalAlignment.Center;
             text.Margin = new(10, 0, 10, 0);
             FrameworkElement icon = C.Icon("devices", 20, "Primary");
             icon.VerticalAlignment = VerticalAlignment.Center;
             DockPanel.SetDock(icon, Dock.Left);
-            devices.Children.Add(new DockPanel { Margin = new(0, 0, 0, 10), LastChildFill = true, Children = { choose, icon, text } });
+            devices.Children.Add(new DockPanel { Margin = new(0, 0, 0, 10), LastChildFill = true, Children = { chooseFolder, choose, icon, text } });
         }
     }
     private void AddFolders()

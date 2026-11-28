@@ -85,6 +85,11 @@ internal sealed class Shell : IDisposable
     {
         get; set;
     }
+    /// <summary>Copies a picked folder with its subfolders into the app's cache (Android).</summary>
+    public static Func<IStorageFolder, Action<string>, Task<string?>>? FolderImportHook
+    {
+        get; set;
+    }
 #endif
     public MetadataStore Store
     {
@@ -183,6 +188,7 @@ internal sealed class Shell : IDisposable
             if (Store.Preferences.Notifications)
                 Notify(record.Direction == "Received" ? "Files received" : "Transfer finished", $"{Format.Count(record.FileCount, "file")} · {record.PeerName}");
         });
+        Root.AttachedToVisualTree += (_, _) => WatchKeyboard();
         Root.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape && menu.IsVisible)
@@ -823,7 +829,23 @@ internal sealed class Shell : IDisposable
 #endif
     }
     public async Task PickFilesAsync() => await AddSelectionsAsync(await PickFilesAsync("Choose files to send"));
-    public async Task PickFoldersAsync() => await AddSelectionsAsync(await PickFoldersAsync("Choose folders to send", true));
+    /// <summary>Folders to send. On Android the chosen folder is copied, with its subfolders, into the app's cache first, as picked files are.</summary>
+    public async Task<string[]> PickFoldersToSendAsync()
+    {
+#if ANDROID
+        IReadOnlyList<IStorageFolder> folders = await Storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose a folder to send" });
+        List<string> copied = [];
+        foreach (IStorageFolder folder in folders)
+            if (FolderImportHook != null && await FolderImportHook(folder, text => Tell(text)) is string path)
+                copied.Add(path);
+        if (copied.Count < folders.Count)
+            Tell("That folder could not be read. Choose files instead.");
+        return [.. copied];
+#else
+        return await PickFoldersAsync("Choose folders to send", true);
+#endif
+    }
+    public async Task PickFoldersAsync() => await AddSelectionsAsync(await PickFoldersToSendAsync());
     /// <summary>Adds files and folders to the selection, then opens Send unless <paramref name="stay"/> keeps the current page (the Home Send panel).</summary>
     public async Task AddSelectionsAsync(IEnumerable<string> paths, bool stay = false)
     {
@@ -869,6 +891,28 @@ internal sealed class Shell : IDisposable
         Tell("Transfer queued. The recipient must approve before any file bytes are sent.");
     }
     /// <summary>Send to a folder: the selection goes straight into a folder chosen on a paired PC. False when nothing was chosen.</summary>
+    private Avalonia.Controls.Platform.IInputPane? keyboard;
+    /// <summary>On a phone the on-screen keyboard covers the bottom of the screen: lift everything by its height and scroll the box being typed in into view.</summary>
+    private void WatchKeyboard()
+    {
+        // Android rebuilds the window after a lock or rotation: follow the new keyboard and drop the old one.
+        Avalonia.Controls.Platform.IInputPane? pane = TopLevel.GetTopLevel(Root)?.InputPane;
+        if (ReferenceEquals(pane, keyboard))
+            return;
+        if (keyboard != null)
+            keyboard.StateChanged -= KeyboardChanged;
+        keyboard = pane;
+        Root.Margin = default;
+        if (pane != null)
+            pane.StateChanged += KeyboardChanged;
+    }
+    private void KeyboardChanged(object? sender, Avalonia.Controls.Platform.InputPaneStateEventArgs e)
+    {
+        double covered = e.NewState == Avalonia.Controls.Platform.InputPaneState.Open ? Math.Max(0, Root.Bounds.Height + Root.Margin.Bottom - e.EndRect.Top) : 0;
+        Root.Margin = new(0, 0, 0, covered);
+        if (covered > 0 && TopLevel.GetTopLevel(Root)?.FocusManager?.GetFocusedElement() is Control focused)
+            Dispatcher.UIThread.Post(() => focused.BringIntoView(), DispatcherPriority.Background);
+    }
     public Task<bool> SendToFolderAsync(Peer peer, bool navigate = true) => SendToFolderAsync(peer, [.. Selection.Select(item => item.Path)], navigate);
     public async Task<bool> SendToFolderAsync(Peer peer, string[] paths, bool navigate = true)
     {

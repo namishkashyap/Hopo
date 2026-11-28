@@ -16,7 +16,7 @@ internal sealed class DropFoldersPage : IPage
     public DropFoldersPage(Shell app)
     {
         this.app = app;
-        StackPanel send = C.Stack(C.Heading("Send into a folder on a PC"), C.Space(C.Text("Tap Choose files next to a PC, pick the files, then open the folder to put them in and tap Send here. You can also make a new folder there.", 12, "Muted"), 14), devices);
+        StackPanel send = C.Stack(C.Heading("Send into a folder on a PC"), C.Space(C.Text("Tap Files or Folder next to a PC and choose what to send. Then open the folder to put it in and tap Send here. You can also create a new folder there.", 12, "Muted"), 14), devices);
         Border sendCard = C.Card(send);
         if (OperatingSystem.IsAndroid())
             View = C.Stack(C.Header("Share", "Drop folders", "Send files straight into a folder on your PC."), C.Space(sendCard, 16, 20),
@@ -41,11 +41,15 @@ internal sealed class DropFoldersPage : IPage
         if (paired.Length == 0)
             devices.Children.Add(C.Stack(C.Space(C.Text("No paired PCs yet. Pair one on the Devices page first.", 13, "Muted"), 10), C.Button("Open Devices", () => app.Navigate("Devices"), icon: "devices")));
         foreach (Peer peer in paired)
-            devices.Children.Add(Row("devices", peer.Name, peer.Online ? "Online" : "Offline: open hopo on it first", peer.Online ? "Success" : "Muted", C.Small("Choose files", () => ChooseAndSendAsync(peer))));
+            devices.Children.Add(Row("devices", peer.Name, peer.Online ? "Online" : "Offline: open hopo on it first", peer.Online ? "Success" : "Muted", C.Small("Folder", () => ChooseAndSendAsync(peer, true)), C.Small("Files", () => ChooseAndSendAsync(peer, false))));
     }
-    private static DockPanel Row(string icon, string title, string detail, string detailColor, Button action)
+    private static DockPanel Row(string icon, string title, string detail, string detailColor, params Button[] actions)
     {
-        DockPanel.SetDock(action, Dock.Right);
+        foreach (Button action in actions)
+        {
+            DockPanel.SetDock(action, Dock.Right);
+            action.Margin = new(6, 0, 0, 0);
+        }
         Control image = C.Icon(icon, 20, "Primary");
         image.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(image, Dock.Left);
@@ -56,7 +60,16 @@ internal sealed class DropFoldersPage : IPage
         text.VerticalAlignment = VerticalAlignment.Center;
         text.Margin = new(10, 0, 10, 0);
         ToolTip.SetTip(text, detail);
-        return new DockPanel { Margin = new(0, 0, 0, 10), LastChildFill = true, Children = { action, image, text } };
+        DockPanel row = new()
+        {
+            Margin = new(0, 0, 0, 10),
+            LastChildFill = true
+        };
+        foreach (Button action in actions)
+            row.Children.Add(action);
+        row.Children.Add(image);
+        row.Children.Add(text);
+        return row;
     }
     private async Task AddFoldersAsync()
     {
@@ -73,9 +86,9 @@ internal sealed class DropFoldersPage : IPage
         Refresh();
         app.Tell(message);
     }
-    private async Task ChooseAndSendAsync(Peer peer)
+    private async Task ChooseAndSendAsync(Peer peer, bool folder)
     {
-        string[] paths = await app.PickFilesAsync("Choose files to send to " + peer.Name);
+        string[] paths = folder ? await app.PickFoldersToSendAsync() : await app.PickFilesAsync("Choose files to send to " + peer.Name);
         if (paths.Length > 0)
             await app.SendToFolderAsync(peer, paths);
     }

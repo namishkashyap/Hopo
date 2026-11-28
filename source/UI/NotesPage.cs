@@ -20,6 +20,7 @@ internal sealed class NotesPage : IPage
     {
         this.app = app;
         System.Windows.Automation.AutomationProperties.SetName(draft, "Text or link to share");
+        Button paste = C.Button("Paste", () => { string text = Clipboard.ContainsText() ? Clipboard.GetText() : ""; if (text.Trim().Length == 0) { app.Tell("Nothing to paste. Copy some text or a link first."); return; } draft.SelectedText = text; draft.CaretIndex = draft.SelectionStart + text.Length; draft.Focus(); });
         Button send = C.AsyncButton("Share text or link", async () =>
         {
             string content = SharedNotes.Validate(draft.Text);
@@ -34,7 +35,7 @@ internal sealed class NotesPage : IPage
         }, true, "send");
         send.Margin = new(12, 0, 0, 0);
         View = C.Stack(C.Hero("Share", "Share text or a link", "Send a note or link to a nearby device, or save it here for your phone. Nothing opens or copies automatically."),
-            C.Space(C.Card(C.Stack(C.Space(draft, 14), C.Inline(target, send), C.Space(C.Text("Up to 16,000 characters. Notes saved here are visible to connected browsers; optional access-code protection applies.", 11, "Muted"), 0, 12))), 24),
+            C.Space(C.Card(C.Stack(C.Space(draft, 10), C.Space(paste, 14), C.Inline(target, send), C.Space(C.Text("Up to 16,000 characters. Notes saved here are visible to connected browsers; optional access-code protection applies.", 11, "Muted"), 0, 12))), 24),
             C.Heading("Shared on this PC", C.Small("Refresh", Refresh)), notes);
         Refresh();
     }

@@ -148,6 +148,21 @@ internal sealed class HomePage : IPage
             HorizontalAlignment = HorizontalAlignment.Center
         });
         StackPanel foot = C.Stack(bar);
+        // The dock steps aside while the on-screen keyboard is open, so it never covers a panel's buttons.
+        Avalonia.Controls.Platform.IInputPane? keyboard = null;
+        void Keyboard(object? sender, Avalonia.Controls.Platform.InputPaneStateEventArgs e) => foot.IsVisible = e.NewState != Avalonia.Controls.Platform.InputPaneState.Open;
+        foot.AttachedToVisualTree += (_, _) =>
+        {
+            keyboard = TopLevel.GetTopLevel(foot)?.InputPane;
+            if (keyboard != null)
+                keyboard.StateChanged += Keyboard;
+        };
+        foot.DetachedFromVisualTree += (_, _) =>
+        {
+            if (keyboard != null)
+                keyboard.StateChanged -= Keyboard;
+            keyboard = null;
+        };
         activityTitle.TextTrimming = activityDetail.TextTrimming = TextTrimming.CharacterEllipsis;
         activity.Child = C.Stack(activityTitle, activityDetail);
         activity.Background = Theme.Brush(Theme.Dark ? "#0C0C14/80" : "Glass");
@@ -525,7 +540,7 @@ internal sealed class HomePage : IPage
         chip.Click += (_, _) => choose();
         return chip;
     }
-    private static Grid Drop(TextBlock text, Button action)
+    private static Grid Drop(TextBlock text, Control action)
     {
         text.VerticalAlignment = VerticalAlignment.Center;
         text.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -625,7 +640,7 @@ internal sealed class HomePage : IPage
                     fillSheet?.Invoke();
                 }));
         };
-        return Sheet("Send files", Drop(summary, C.AsyncButton("Choose files", async () => await app.AddSelectionsAsync(await app.PickFilesAsync("Choose files to send"), true), icon: "plus")), chosenFiles, Labelled("Send to", targets), send, intoFolder);
+        return Sheet("Send files", Drop(summary, C.Inline(C.AsyncButton("Choose files", async () => await app.AddSelectionsAsync(await app.PickFilesAsync("Choose files to send"), true), icon: "plus"), C.AsyncButton("Folder", async () => await app.AddSelectionsAsync(await app.PickFoldersToSendAsync(), true), icon: "folder"))), chosenFiles, Labelled("Send to", targets), send, intoFolder);
     }
     private StackPanel FolderSheet()
     {
@@ -707,7 +722,25 @@ internal sealed class HomePage : IPage
         };
         // The message box is kept between openings so a draft survives; the previous panel still holds it.
         (message.Parent as Panel)?.Children.Remove(message);
-        return Sheet("Share text or a link", C.Stack(C.Space(C.Text("Message", 12, "Muted"), 6), message), Labelled("Send to", targets), share);
+        Button paste = C.Small("Paste", async () =>
+        {
+            string text = TopLevel.GetTopLevel(message)?.Clipboard is { } clipboard ? await Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard) ?? "" : "";
+            if (text.Trim().Length == 0)
+            {
+                app.Tell("Nothing to paste. Copy some text or a link first.");
+                return;
+            }
+            message.SelectedText = text;
+            message.Focus();
+        });
+        DockPanel.SetDock(paste, Dock.Right);
+        DockPanel title = new()
+        {
+            Margin = new(0, 0, 0, 6),
+            Children = { paste, C.Text("Message", 12, "Muted") }
+        };
+        title.Children[1].VerticalAlignment = VerticalAlignment.Bottom;
+        return Sheet("Share text or a link", C.Stack(title, message), Labelled("Send to", targets), share);
     }
     private StackPanel PhoneSheet()
     {
@@ -769,7 +802,7 @@ internal sealed class SendPage : IPage
     {
         this.app = app;
         // Android cannot hand hopo a whole folder, and nothing is dropped onto a phone: it adds files only.
-        StackPanel tools = OperatingSystem.IsAndroid() ? C.Inline(C.AsyncButton("Add files", app.PickFilesAsync, icon: "plus"), C.Ghost(C.Button("Clear", () => { app.Selection.Clear(); Refresh(); }))) : C.Inline(C.AsyncButton("Add files", app.PickFilesAsync, icon: "plus"), C.AsyncButton("Add folder", app.PickFoldersAsync, icon: "folder"), C.Ghost(C.Button("Clear", () => { app.Selection.Clear(); Refresh(); })));
+        StackPanel tools = C.Inline(C.AsyncButton("Add files", app.PickFilesAsync, icon: "plus"), C.AsyncButton("Add folder", app.PickFoldersAsync, icon: "folder"), C.Ghost(C.Button("Clear", () => { app.Selection.Clear(); Refresh(); })));
         tools.VerticalAlignment = VerticalAlignment.Center;
         DockPanel top = new();
         if (OperatingSystem.IsAndroid())
