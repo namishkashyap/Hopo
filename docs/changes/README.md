@@ -53,3 +53,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-27 | [Drop folders get their own menu page (2.7.1)](2026-11-27-drop-folders-page.md) |
 | 2026-11-28 | [Keyboard, Paste button and folders from the phone (2.7.2)](2026-11-28-keyboard-paste-folders.md) |
 | 2026-11-28 | [Phone menu fits the screen (2.7.3)](2026-11-28-phone-menu-fit.md) |
+| 2026-11-28 | [Trusted devices send into drop folders without asking (2.7.4)](2026-11-28-drop-folder-trust.md) |
