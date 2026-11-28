@@ -51,3 +51,4 @@ checked, what is still unverified, and how to roll it back.
 | 2026-11-26 | [hopo Android: choose, see and remove several files](2026-11-26-android-multi-select.md) |
 | 2026-11-27 | [Send straight into a folder on another PC (drop folders)](2026-11-27-send-to-folder.md) |
 | 2026-11-27 | [Drop folders get their own menu page (2.7.1)](2026-11-27-drop-folders-page.md) |
+| 2026-11-28 | [Keyboard, Paste button and folders from the phone (2.7.2)](2026-11-28-keyboard-paste-folders.md) |
